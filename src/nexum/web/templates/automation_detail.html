@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ rule.name }} {% if not rule.enabled %}<span class="badge badge-muted">disabled</span>{% endif %}</h1>
+  <div class="row">
+    <a class="btn btn-sm" href="/automations">All automations</a>
+    <form method="post" action="/automations/{{ rule.id }}/run"><button class="btn btn-sm btn-primary">Run now</button></form>
+    {% if current_user.has_role(Role.ADMIN) %}
+      <form method="post" action="/automations/{{ rule.id }}/toggle"><button class="btn btn-sm">{{ 'Disable' if rule.enabled else 'Enable' }}</button></form>
+      <form method="post" action="/automations/{{ rule.id }}/delete" onsubmit="return confirm('Delete this rule and its history?')"><button class="btn btn-sm btn-ghost">Delete</button></form>
+    {% endif %}
+  </div>
+</div>
+<p class="muted">{{ rule.description or '' }}</p>
+<div class="columns">
+  <section class="card">
+    <h2>Definition</h2>
+    <dl class="dl">
+      <dt>Trigger</dt><dd><code>{{ trigger_text }}</code></dd>
+      <dt>Runs</dt><dd>{{ rule.run_count }} · last {{ rule.last_run_at|dt }}{% if rule.next_run_at and rule.enabled %} · next {{ rule.next_run_at|dt }}{% endif %}</dd>
+      <dt>Saves</dt><dd>{{ rule.estimated_minutes_saved }} min per productive run</dd>
+    </dl>
+    <h3>Trigger config</h3><pre class="json">{{ rule.trigger_config|pretty_json }}</pre>
+    <h3>Conditions</h3><pre class="json">{{ rule.conditions|pretty_json }}</pre>
+    <h3>Actions</h3><pre class="json">{{ rule.actions|pretty_json }}</pre>
+  </section>
+  <section class="card">
+    <h2>Run history</h2>
+    {% for run in runs %}
+      <details class="run" {{ 'open' if loop.first }}>
+        <summary><span class="badge badge-{{ run.status.value }}">{{ run.status.value }}</span> {{ run.started_at|dt }} · {{ run.trigger_summary }} · {{ run.duration_ms }} ms{% if run.minutes_saved %} · saved {{ run.minutes_saved }} min{% endif %}</summary>
+        <ul class="list compact">{% for line in run.log %}<li><code>{{ line }}</code></li>{% endfor %}</ul>
+        {% if run.error %}<p class="flash flash-error">{{ run.error }}</p>{% endif %}
+      </details>
+    {% else %}<p class="muted">This rule has not run yet.</p>{% endfor %}
+  </section>
+</div>
+{% endblock %}

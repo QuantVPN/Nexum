@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title ~ " · " if title else "" }}{{ settings.app_name }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">{{ settings.app_name }}</a>
+  {% if current_user %}
+  <nav class="nav">
+    {% if current_user.has_role(Role.MANAGER) %}
+      <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' }}">Dashboard</a>
+      <a href="/schedule" class="{{ 'active' if request.url.path.startswith('/schedule') or request.url.path.startswith('/templates') }}">Schedule</a>
+      <a href="/employees" class="{{ 'active' if request.url.path.startswith('/employees') }}">Employees</a>
+      <a href="/approvals" class="{{ 'active' if request.url.path.startswith('/approvals') }}">Approvals</a>
+      <a href="/payroll" class="{{ 'active' if request.url.path.startswith('/payroll') }}">Payroll</a>
+      <a href="/automations" class="{{ 'active' if request.url.path.startswith('/automations') }}">Automations</a>
+    {% endif %}
+    {% if current_user.employee %}
+      <a href="/me" class="{{ 'active' if request.url.path.startswith('/me') }}">My page</a>
+    {% endif %}
+  </nav>
+  <div class="user">
+    <a href="/notifications" class="bell" title="Notifications">🔔{% if unread_count %}<span class="badge-count">{{ unread_count }}</span>{% endif %}</a>
+    <span class="who">{{ current_user.full_name }} <small>({{ current_user.role.value }})</small></span>
+    <form method="post" action="/logout"><button class="btn btn-ghost btn-sm">Sign out</button></form>
+  </div>
+  {% endif %}
+</header>
+<main class="container">
+  {% for level, message in flashes %}
+    <div class="flash flash-{{ level }}">{{ message }}</div>
+  {% endfor %}
+  {% block content %}{% endblock %}
+</main>
+<footer class="footer">{{ settings.app_name }} v{{ app_version }} · all times UTC</footer>
+</body>
+</html>

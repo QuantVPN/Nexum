@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Schedule · week of {{ week|d }}</h1>
+  <div class="row">
+    <a class="btn btn-sm" href="/schedule?week={{ prev_week|d }}{% if department_id %}&department_id={{ department_id }}{% endif %}">← Previous</a>
+    <a class="btn btn-sm" href="/schedule{% if department_id %}?department_id={{ department_id }}{% endif %}">This week</a>
+    <a class="btn btn-sm" href="/schedule?week={{ next_week|d }}{% if department_id %}&department_id={{ department_id }}{% endif %}">Next →</a>
+    <form method="get" action="/schedule" class="row">
+      <input type="hidden" name="week" value="{{ week|d }}">
+      <select name="department_id" onchange="this.form.submit()">
+        <option value="">All departments</option>
+        {% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if d.id == department_id }}>{{ d.name }}</option>{% endfor %}
+      </select>
+    </form>
+    <a class="btn btn-sm btn-ghost" href="/templates">Templates</a>
+  </div>
+</div>
+
+<section class="toolbar card">
+  <form method="post" action="/schedule/generate"><input type="hidden" name="week" value="{{ week|d }}"><input type="hidden" name="department_id" value="{{ department_id or '' }}"><button class="btn">1 · Generate from templates</button></form>
+  <form method="post" action="/schedule/auto-assign"><input type="hidden" name="week" value="{{ week|d }}"><input type="hidden" name="department_id" value="{{ department_id or '' }}"><button class="btn">2 · Auto-assign open shifts</button></form>
+  <form method="post" action="/schedule/publish"><input type="hidden" name="week" value="{{ week|d }}"><input type="hidden" name="department_id" value="{{ department_id or '' }}"><button class="btn btn-primary" {{ 'disabled' if not drafts }}>3 · Publish {{ drafts }} draft(s)</button></form>
+  <span class="muted">{{ total_shifts }} shifts · {{ open_shifts|length }} open</span>
+</section>
+
+<section class="card schedule-wrap">
+  <table class="schedule">
+    <thead><tr><th class="who">Employee</th>{% for day in days %}<th class="{{ 'today' if day == today }}">{{ day.strftime('%a') }}<br><small>{{ day.strftime('%d %b') }}</small></th>{% endfor %}<th>Hours</th></tr></thead>
+    <tbody>
+      <tr class="open-row">
+        <td class="who"><strong>Open shifts</strong></td>
+        {% for day in days %}<td>
+          {% for s in grid[None][day] %}
+            <div class="chip chip-open">
+              <span>{{ s.starts_at|t }}–{{ s.ends_at|t }}{% if s.role_label %} · {{ s.role_label }}{% endif %}</span>
+              <small>{{ s.department.name }} · {{ s.status.value }}</small>
+              <form method="post" action="/shifts/{{ s.id }}/assign" class="row tight">
+                <select name="employee_id" required>
+                  <option value="">assign…</option>
+                  {% for c in candidates[s.id] %}<option value="{{ c.id }}">{{ c.full_name }} ({{ hours.get(c.id, 0) }}h)</option>{% endfor %}
+                </select>
+                <button class="btn btn-xs">OK</button>
+              </form>
+              <form method="post" action="/shifts/{{ s.id }}/cancel"><button class="btn btn-xs btn-ghost">cancel</button></form>
+            </div>
+          {% endfor %}
+        </td>{% endfor %}
+        <td></td>
+      </tr>
+      {% for e in employees %}
+      <tr>
+        <td class="who"><a href="/employees/{{ e.id }}">{{ e.full_name }}</a><br><small class="muted">{{ e.department.name if e.department else '' }}</small></td>
+        {% for day in days %}<td>
+          {% for s in grid[e.id][day] %}
+            <div class="chip chip-{{ s.status.value }}">
+              <span>{{ s.starts_at|t }}–{{ s.ends_at|t }}{% if s.role_label %} · {{ s.role_label }}{% endif %}</span>
+              <small>{{ s.status.value }}</small>
+              <div class="row tight">
+                <form method="post" action="/shifts/{{ s.id }}/unassign"><button class="btn btn-xs btn-ghost" title="Make open">open</button></form>
+                <form method="post" action="/shifts/{{ s.id }}/cancel"><button class="btn btn-xs btn-ghost" title="Cancel shift">✕</button></form>
+              </div>
+            </div>
+          {% endfor %}
+        </td>{% endfor %}
+        <td class="{{ 'over' if hours.get(e.id, 0) > e.weekly_hours }}">{{ hours.get(e.id, 0) }} / {{ e.weekly_hours }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="muted">No employees in this department.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Add a shift</h2>
+  <form method="post" action="/shifts" class="row wrap">
+    <label>Department <select name="department_id" required>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if d.id == department_id }}>{{ d.name }}</option>{% endfor %}</select></label>
+    <label>Start <input type="datetime-local" name="starts_at" value="{{ week|d }}T08:00" required></label>
+    <label>End <input type="datetime-local" name="ends_at" value="{{ week|d }}T16:00" required></label>
+    <label>Employee <select name="employee_id"><option value="">open shift</option>{% for e in employees %}<option value="{{ e.id }}">{{ e.full_name }}</option>{% endfor %}</select></label>
+    <label>Role <input name="role_label" placeholder="e.g. Support"></label>
+    <label class="check"><input type="checkbox" name="publish" value="1"> publish now</label>
+    <button class="btn btn-primary">Add shift</button>
+  </form>
+</section>
+{% endblock %}

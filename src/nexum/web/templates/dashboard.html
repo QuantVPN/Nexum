@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Company overview</h1>
+  <span class="muted">Week of {{ data.week_start|d }} · generated {{ data.generated_at|dt }}</span>
+</div>
+
+<section class="tiles">
+  <a class="tile" href="/employees"><span class="label">Headcount</span><span class="value">{{ data.headcount }}</span><span class="sub">{{ data.departments }} department(s)</span></a>
+  <a class="tile" href="/schedule"><span class="label">Scheduled this week</span><span class="value">{{ data.week_scheduled_hours|hours }}</span><span class="sub">{{ data.week_shift_count }} shifts · {{ data.week_draft_shifts }} drafts</span></a>
+  <a class="tile {{ 'warn' if data.open_shifts_next_7_days }}" href="/schedule"><span class="label">Open shifts, next 7 days</span><span class="value">{{ data.open_shifts_next_7_days }}</span><span class="sub">need cover</span></a>
+  <a class="tile" href="/payroll/{{ data.pay_period.id }}"><span class="label">Projected payroll</span><span class="value">{{ data.projected_gross|money }}</span><span class="sub">{{ data.pay_period.label }} · {{ data.pay_period.status.value }}</span></a>
+  <a class="tile {{ 'warn' if data.pending_time_off or data.pending_time_entries }}" href="/approvals"><span class="label">Waiting for approval</span><span class="value">{{ data.pending_time_off + data.pending_time_entries }}</span><span class="sub">{{ data.pending_time_off }} time off · {{ data.pending_time_entries }} timesheets</span></a>
+  <a class="tile {{ 'warn' if data.shifts_missing_time_entries }}" href="/approvals"><span class="label">Missing time entries</span><span class="value">{{ data.shifts_missing_time_entries }}</span><span class="sub">last 7 days</span></a>
+  <a class="tile accent" href="/automations"><span class="label">Automation, last 7 days</span><span class="value">{{ data.automation.hours_saved_7d }} h saved</span><span class="sub">{{ data.automation.runs_7d }} runs · {{ data.automation.failed_7d }} failed · {{ data.automation.enabled_rules }}/{{ data.automation.total_rules }} rules on</span></a>
+</section>
+
+<div class="columns">
+  <section class="card">
+    <h2>Departments this week</h2>
+    <table>
+      <thead><tr><th>Department</th><th>People</th><th>Shifts</th><th>Open</th><th>Hours</th></tr></thead>
+      <tbody>
+      {% for row in departments %}
+        <tr><td><a href="/schedule?department_id={{ row.department.id }}">{{ row.department.name }}</a></td><td>{{ row.headcount }}</td><td>{{ row.week_shifts }}</td><td>{% if row.open_shifts %}<span class="badge badge-warn">{{ row.open_shifts }}</span>{% else %}0{% endif %}</td><td>{{ row.week_hours|hours }}</td></tr>
+      {% else %}
+        <tr><td colspan="5" class="muted">No departments yet. <a href="/employees">Create one</a>.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Open shifts</h2>
+    {% if data.open_shifts %}
+    <ul class="list">
+      {% for s in data.open_shifts %}
+      <li><strong>{{ s.starts_at|dt }}–{{ s.ends_at|t }}</strong> {{ s.department.name }}{% if s.role_label %} · {{ s.role_label }}{% endif %} <span class="badge">{{ s.status.value }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">Everything in the next 7 days is covered.</p>{% endif %}
+  </section>
+</div>
+
+<div class="columns">
+  <section class="card">
+    <h2>Pending time off</h2>
+    {% if data.pending_time_off_items %}
+    <ul class="list">
+      {% for r in data.pending_time_off_items %}
+      <li>{{ r.employee.full_name }} · {{ r.kind.value }} · {{ r.start_date|d }} to {{ r.end_date|d }} ({{ r.days }} d)</li>
+      {% endfor %}
+    </ul>
+    <a class="btn btn-sm" href="/approvals">Review</a>
+    {% else %}<p class="muted">Nothing waiting.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Recent activity</h2>
+    <ul class="list compact">
+      {% for a in data.recent_audit %}
+      <li><span class="muted">{{ a.created_at|dt }}</span> <code>{{ a.action }}</code> {{ a.entity_type }}{% if a.entity_id %} #{{ a.entity_id }}{% endif %} <span class="muted">by {{ a.actor_label }}</span></li>
+      {% else %}<li class="muted">No activity yet.</li>{% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}

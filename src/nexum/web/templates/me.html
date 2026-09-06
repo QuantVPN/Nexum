@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Hi {{ o.employee.first_name }}</h1><nav class="subnav"><a href="/me" class="active">Overview</a><a href="/me/time">Time</a><a href="/me/pay">Pay</a><a href="/me/requests">Time off</a></nav></div>
+<section class="tiles">
+  <div class="tile"><span class="label">Next shift</span><span class="value">{% if o.next_shift %}{{ o.next_shift.starts_at|dt }}{% else %}—{% endif %}</span><span class="sub">{% if o.next_shift %}until {{ o.next_shift.ends_at|t }} · {{ o.next_shift.department.name }}{% else %}nothing scheduled{% endif %}</span></div>
+  <div class="tile"><span class="label">This week</span><span class="value">{{ o.week_hours|hours }}</span><span class="sub">of {{ o.weekly_hours_target }} h</span></div>
+  <div class="tile accent"><span class="label">Estimated pay {{ o.current_period.label }}</span><span class="value">{{ o.current_estimate.gross_amount|money(o.employee.currency) }}</span><span class="sub">{{ o.current_estimate.regular_hours }} h + {{ o.current_estimate.overtime_hours }} h overtime</span></div>
+  <div class="tile"><span class="label">Time clock</span>
+    {% if o.open_time_entry %}
+      <span class="value">Clocked in</span><span class="sub">since {{ o.open_time_entry.clock_in|dt }}</span>
+      <form method="post" action="/me/clock-out" class="row tight"><input type="number" name="break_minutes" value="0" min="0" title="Break minutes" style="width:5em"> <button class="btn btn-sm btn-primary">Clock out</button></form>
+    {% else %}
+      <span class="value">Off</span>
+      <form method="post" action="/me/clock-in"><button class="btn btn-sm btn-primary">Clock in</button></form>
+    {% endif %}
+  </div>
+</section>
+<div class="columns">
+  <section class="card">
+    <h2>Upcoming shifts (14 days)</h2>
+    <ul class="list">{% for s in o.upcoming_shifts %}<li><strong>{{ s.starts_at|dt }}–{{ s.ends_at|t }}</strong> · {{ s.department.name }}{% if s.role_label %} · {{ s.role_label }}{% endif %}</li>{% else %}<li class="muted">No published shifts yet.</li>{% endfor %}</ul>
+  </section>
+  <section class="card">
+    <h2>Time off</h2>
+    <ul class="list">{% for r in o.time_off_requests[:5] %}<li>{{ r.kind.value }} {{ r.start_date|d }} → {{ r.end_date|d }} <span class="badge badge-{{ r.status.value }}">{{ r.status.value }}</span></li>{% else %}<li class="muted">No requests.</li>{% endfor %}</ul>
+    <a class="btn btn-sm" href="/me/requests">Request time off</a>
+  </section>
+</div>
+{% endblock %}

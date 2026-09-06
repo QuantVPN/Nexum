@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>{{ employee.full_name }}</h1><a class="btn btn-sm" href="/employees">All employees</a></div>
+<div class="columns">
+  <section class="card">
+    <h2>Profile</h2>
+    <dl class="dl">
+      <dt>Email</dt><dd>{{ employee.email }}</dd>
+      <dt>Department</dt><dd>{{ employee.department.name if employee.department else '—' }}</dd>
+      <dt>Title</dt><dd>{{ employee.title or '—' }}</dd>
+      <dt>Employment</dt><dd>{{ employee.employment_type.value.replace('_',' ') }} · {{ employee.weekly_hours }} h/week</dd>
+      <dt>Pay</dt><dd>{% if employee.pay_type.value == 'hourly' %}{{ employee.hourly_rate|money(employee.currency) }} per hour{% else %}{{ employee.monthly_salary|money(employee.currency) }} per month{% endif %}</dd>
+      <dt>Started</dt><dd>{{ employee.start_date|d }}{% if employee.end_date %} · ended {{ employee.end_date|d }}{% endif %}</dd>
+      <dt>Login</dt><dd>{% if employee.user %}{{ employee.user.role.value }} · last login {{ employee.user.last_login_at|dt }}{% else %}none{% endif %}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <h2>This period</h2>
+    <dl class="dl">
+      <dt>Hours this week</dt><dd>{{ o.week_hours|hours }} of {{ o.weekly_hours_target }} h</dd>
+      <dt>Estimated gross</dt><dd>{{ o.current_estimate.gross_amount|money(employee.currency) }} ({{ o.current_period.label }})</dd>
+      <dt>Overtime</dt><dd>{{ o.current_estimate.overtime_hours }} h</dd>
+      <dt>Next shift</dt><dd>{% if o.next_shift %}{{ o.next_shift.starts_at|dt }}–{{ o.next_shift.ends_at|t }}{% else %}none scheduled{% endif %}</dd>
+    </dl>
+  </section>
+</div>
+<div class="columns">
+  <section class="card">
+    <h2>Upcoming shifts</h2>
+    <ul class="list">{% for s in o.upcoming_shifts %}<li>{{ s.starts_at|dt }}–{{ s.ends_at|t }} · {{ s.department.name }}{% if s.role_label %} · {{ s.role_label }}{% endif %}</li>{% else %}<li class="muted">Nothing published yet.</li>{% endfor %}</ul>
+  </section>
+  <section class="card">
+    <h2>Recent time entries</h2>
+    <table><thead><tr><th>In</th><th>Out</th><th>Break</th><th>Hours</th><th>Status</th></tr></thead><tbody>
+    {% for e in entries %}<tr><td>{{ e.clock_in|dt }}</td><td>{{ e.clock_out|dt }}</td><td>{{ e.break_minutes }} min</td><td>{{ '%.2f'|format(e.worked_hours) }}</td><td><span class="badge badge-{{ e.status.value }}">{{ e.status.value }}</span></td></tr>{% else %}<tr><td colspan="5" class="muted">No entries in the last 30 days.</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+</div>
+<section class="card">
+  <h2>Time off</h2>
+  <table><thead><tr><th>Kind</th><th>From</th><th>To</th><th>Days</th><th>Status</th></tr></thead><tbody>
+  {% for r in o.time_off_requests %}<tr><td>{{ r.kind.value }}</td><td>{{ r.start_date|d }}</td><td>{{ r.end_date|d }}</td><td>{{ r.days }}</td><td><span class="badge badge-{{ r.status.value }}">{{ r.status.value }}</span></td></tr>{% else %}<tr><td colspan="5" class="muted">No requests.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

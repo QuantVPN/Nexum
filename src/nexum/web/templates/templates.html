@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Schedule templates</h1><a class="btn btn-sm" href="/schedule">Back to schedule</a></div>
+<p class="muted">Templates describe the recurring weekly need ("2 people, Monday 08:00–17:00"). The weekly automation drafts next week's shifts from them and auto-assigns available employees.</p>
+<div class="columns wide-left">
+  <section class="card">
+    <table>
+      <thead><tr><th>Day</th><th>Time</th><th>Department</th><th>Name</th><th>Role</th><th>Headcount</th><th></th></tr></thead>
+      <tbody>
+      {% for t in templates_ %}
+        <tr><td>{{ t.weekday|weekday }}</td><td>{{ t.start_time.strftime('%H:%M') }}–{{ t.end_time.strftime('%H:%M') }}</td><td>{{ t.department.name }}</td><td>{{ t.name }}</td><td>{{ t.role_label or '—' }}</td><td>{{ t.headcount }}</td>
+        <td><form method="post" action="/templates/{{ t.id }}/delete"><button class="btn btn-xs btn-ghost">remove</button></form></td></tr>
+      {% else %}<tr><td colspan="7" class="muted">No templates yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section class="card">
+    <h2>Add template</h2>
+    <form method="post" action="/templates" class="stack">
+      <label>Department <select name="department_id" required>{% for d in departments %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+      <label>Name <input name="name" value="Day shift" required></label>
+      <div class="row"><label>Start <input type="time" name="start_time" value="08:00" required></label><label>End <input type="time" name="end_time" value="17:00" required></label></div>
+      <div class="row"><label>Headcount <input type="number" name="headcount" value="1" min="1"></label><label>Role <input name="role_label"></label></div>
+      <fieldset class="weekdays"><legend>Weekdays</legend>
+        {% for i in range(7) %}<label class="check"><input type="checkbox" name="weekdays" value="{{ i }}" {{ 'checked' if i < 5 }}> {{ i|weekday }}</label>{% endfor %}
+      </fieldset>
+      <button class="btn btn-primary">Add template</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

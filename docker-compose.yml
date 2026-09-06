@@ -1,0 +1,31 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      NEXUM_SECRET_KEY: ${NEXUM_SECRET_KEY:-change-me-please}
+      NEXUM_DATABASE_URL: postgresql+psycopg://nexum:nexum@db:5432/nexum
+      NEXUM_ENVIRONMENT: production
+      NEXUM_DEFAULT_CURRENCY: ${NEXUM_DEFAULT_CURRENCY:-SEK}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nexum
+      POSTGRES_PASSWORD: nexum
+      POSTGRES_DB: nexum
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexum"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
