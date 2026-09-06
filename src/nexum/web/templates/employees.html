@@ -50,6 +50,7 @@
           <label>Monthly salary <input name="monthly_salary" placeholder="e.g. 38000"></label>
           <label>Hourly rate <input name="hourly_rate" placeholder="e.g. 210"></label>
         </div>
+        <label>Skills (comma separated) <input name="skills" placeholder="forklift, first aid"></label>
         <div class="row">
           <label>Login password <input name="login_password" placeholder="leave empty for no login"></label>
           <label>Role <select name="role">{% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select></label>

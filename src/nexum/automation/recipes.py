@@ -205,6 +205,100 @@ RECIPES: list[dict[str, Any]] = [
         "estimated_minutes_saved": 120,
     },
     {
+        "key": "auto-approve-claims",
+        "name": "Auto-approve conflict-free shift claims",
+        "description": "When an employee claims an open shift and nothing conflicts, approve it instantly instead of waiting for a manager.",
+        "trigger_type": TriggerType.EVENT,
+        "trigger_config": {"event": "shift.claim_requested"},
+        "conditions": [],
+        "actions": [{"type": "auto_approve_shift_requests", "params": {"kinds": ["claim"]}}],
+        "estimated_minutes_saved": 5,
+    },
+    {
+        "key": "drop-request-alert",
+        "name": "Route drop requests to managers",
+        "trigger_type": TriggerType.EVENT,
+        "trigger_config": {"event": "shift.drop_requested"},
+        "conditions": [],
+        "actions": [
+            {
+                "type": "notify_role",
+                "params": {
+                    "role": "manager",
+                    "title": "{employee.full_name} wants to drop {shift.starts_at}",
+                    "body": "{shift.department} {shift.hours}h. Note: {shift_request.note}",
+                    "link": "/approvals",
+                },
+            }
+        ],
+        "estimated_minutes_saved": 2,
+    },
+    {
+        "key": "transfer-request-alert",
+        "name": "Route hand-over requests to managers",
+        "trigger_type": TriggerType.EVENT,
+        "trigger_config": {"event": "shift.transfer_requested"},
+        "conditions": [],
+        "actions": [
+            {
+                "type": "notify_role",
+                "params": {
+                    "role": "manager",
+                    "title": "{employee.full_name} wants to hand {shift.starts_at} to {target.full_name}",
+                    "body": "{shift.department} {shift.hours}h. Note: {shift_request.note}",
+                    "link": "/approvals",
+                },
+            }
+        ],
+        "estimated_minutes_saved": 2,
+    },
+    {
+        "key": "shift-request-approved-notify",
+        "name": "Tell employees when a shift request is approved",
+        "trigger_type": TriggerType.EVENT,
+        "trigger_config": {"event": "shift.request_approved"},
+        "conditions": [],
+        "actions": [
+            {
+                "type": "notify_employee",
+                "params": {
+                    "title": "Your {shift_request.kind} request was approved",
+                    "body": "Shift {shift.starts_at}-{shift.ends_at} ({shift.department}).",
+                    "link": "/me/shifts",
+                },
+            },
+            {
+                "type": "notify_employee",
+                "params": {
+                    "employee_id": "{event.target_employee_id}",
+                    "title": "A shift was handed to you",
+                    "body": "{shift_request.employee_name} handed you {shift.starts_at}-{shift.ends_at} ({shift.department}).",
+                    "link": "/me/shifts",
+                },
+            },
+        ],
+        "estimated_minutes_saved": 2,
+    },
+    {
+        "key": "shift-request-rejected-notify",
+        "name": "Tell employees when a shift request is declined",
+        "trigger_type": TriggerType.EVENT,
+        "trigger_config": {"event": "shift.request_rejected"},
+        "conditions": [],
+        "actions": [
+            {
+                "type": "notify_employee",
+                "params": {
+                    "title": "Your {shift_request.kind} request was declined",
+                    "body": "Shift {shift.starts_at}-{shift.ends_at} ({shift.department}).",
+                    "level": "warning",
+                    "link": "/me/shifts",
+                },
+            }
+        ],
+        "estimated_minutes_saved": 2,
+    },
+    {
         "key": "schedule-published-notify",
         "name": "Send employees their schedule when it is published",
         "description": "Every affected employee gets one message listing their published shifts.",

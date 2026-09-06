@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter
 
-from nexum.api.deps import CurrentUser, DbSession, ManagerUser
+from nexum.api.deps import CurrentEmployee, CurrentUser, DbSession, ManagerUser
 from nexum.api.schemas import (
     AssignIn,
     CountOut,
@@ -53,6 +53,13 @@ def list_shifts(
     return [ShiftOut.model_validate(s) for s in rows]
 
 
+@router.get("/shifts/claimable", response_model=list[ShiftOut])
+def claimable(db: DbSession, employee: CurrentEmployee, days: int = 14) -> list[ShiftOut]:
+    now = utcnow()
+    rows = scheduling.claimable_shifts(db, employee, now, now + timedelta(days=days))
+    return [ShiftOut.model_validate(s) for s in rows]
+
+
 @router.post("/shifts", response_model=ShiftOut, status_code=201)
 def create_shift(payload: ShiftIn, db: DbSession, user: ManagerUser) -> ShiftOut:
     department = people.get_department(db, payload.department_id)
@@ -66,6 +73,11 @@ def create_shift(payload: ShiftIn, db: DbSession, user: ManagerUser) -> ShiftOut
         role_label=payload.role_label,
         status=payload.status,
         notes=payload.notes,
+        required_skill=(
+            people.get_or_create_skill(db, payload.required_skill)
+            if payload.required_skill
+            else None
+        ),
         actor=user,
     )
     commit_and_dispatch(db)
@@ -76,7 +88,9 @@ def create_shift(payload: ShiftIn, db: DbSession, user: ManagerUser) -> ShiftOut
 def assign(shift_id: int, payload: AssignIn, db: DbSession, user: ManagerUser) -> ShiftOut:
     shift = scheduling.get_shift(db, shift_id)
     employee = people.get_employee(db, payload.employee_id)
-    scheduling.assign_shift(db, shift, employee, actor=user)
+    scheduling.assign_shift(
+        db, shift, employee, actor=user, ignore_availability=payload.ignore_availability
+    )
     commit_and_dispatch(db)
     return ShiftOut.model_validate(shift)
 
@@ -152,6 +166,16 @@ def create_template(payload: TemplateIn, db: DbSession, _: ManagerUser) -> Templ
         end_time=payload.end_time,
         headcount=payload.headcount,
         role_label=payload.role_label,
+        required_skill=(
+            people.get_or_create_skill(db, payload.required_skill)
+            if payload.required_skill
+            else None
+        ),
     )
     commit_and_dispatch(db)
     return TemplateOut.model_validate(template)
+
+
+@router.get("/skills", response_model=list[str])
+def skills(db: DbSession, _: CurrentUser) -> list[str]:
+    return [s.name for s in people.list_skills(db)]

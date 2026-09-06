@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>My shifts</h1>{% include "_me_nav.html" %}</div>
+<div class="columns">
+  <section class="card">
+    <h2>Upcoming shifts (4 weeks)</h2>
+    <p class="muted">Subscribe in your calendar app: <code>{{ request.base_url|string|trim('/') }}{{ calendar_url }}</code></p>
+    <table><thead><tr><th>When</th><th>Where</th><th></th></tr></thead><tbody>
+    {% for s in mine %}
+      <tr>
+        <td><strong>{{ s.starts_at|dt }}–{{ s.ends_at|t }}</strong></td>
+        <td>{{ s.department.name }}{% if s.role_label %} · {{ s.role_label }}{% endif %}{% if s.required_skill_name %} · <span class="badge">{{ s.required_skill_name }}</span>{% endif %}</td>
+        <td>
+          {% if s.id in pending_shift_ids %}<span class="badge badge-pending">request pending</span>
+          {% else %}
+          <details><summary class="btn btn-xs">Give away…</summary>
+            <form method="post" action="/me/shifts/{{ s.id }}/drop" class="row tight">{{ csrf_input }}<input name="note" placeholder="reason (optional)"><button class="btn btn-xs">Ask to drop</button></form>
+            <form method="post" action="/me/shifts/{{ s.id }}/transfer" class="row tight">{{ csrf_input }}
+              <select name="target_employee_id" required><option value="">hand to…</option>{% for c in colleagues %}<option value="{{ c.id }}">{{ c.full_name }}</option>{% endfor %}</select>
+              <button class="btn btn-xs">Hand over</button>
+            </form>
+          </details>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="3" class="muted">No published shifts in the next four weeks.</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+  <section class="card">
+    <h2>Open shifts you can claim <span class="badge">{{ claimable|length }}</span></h2>
+    <p class="muted">Claims are approved automatically when nothing conflicts with your schedule, availability or weekly hours.</p>
+    <table><thead><tr><th>When</th><th>Where</th><th></th></tr></thead><tbody>
+    {% for s in claimable %}
+      <tr><td><strong>{{ s.starts_at|dt }}–{{ s.ends_at|t }}</strong></td><td>{{ s.department.name }}{% if s.role_label %} · {{ s.role_label }}{% endif %}</td>
+      <td><form method="post" action="/me/shifts/{{ s.id }}/claim">{{ csrf_input }}<button class="btn btn-xs btn-primary">Claim</button></form></td></tr>
+    {% else %}<tr><td colspan="3" class="muted">Nothing open right now.</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+</div>
+<section class="card">
+  <h2>My requests</h2>
+  <table><thead><tr><th>Kind</th><th>Shift</th><th>To</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>
+  {% for r in history %}
+    <tr><td>{{ r.kind.value }}</td><td>{{ r.shift.starts_at|dt }}–{{ r.shift.ends_at|t }}</td><td>{{ r.target_employee.full_name if r.target_employee else '—' }}</td><td><span class="badge badge-{{ r.status.value }}">{{ r.status.value }}</span></td><td class="muted">{{ r.decision_note or r.note or '' }}</td>
+    <td>{% if r.status.value == 'pending' %}<form method="post" action="/me/shift-requests/{{ r.id }}/cancel">{{ csrf_input }}<button class="btn btn-xs btn-ghost">cancel</button></form>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="6" class="muted">No requests yet.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

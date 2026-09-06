@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>My pay</h1><nav class="subnav"><a href="/me">Overview</a><a href="/me/time">Time</a><a href="/me/pay" class="active">Pay</a><a href="/me/requests">Time off</a></nav></div>
+<div class="page-head"><h1>My pay</h1>{% include "_me_nav.html" %}</div>
 <div class="columns">
   <section class="card">
     <h2>Estimate for {{ period.label }} <span class="badge badge-{{ period.status.value }}">{{ period.status.value }}</span></h2>

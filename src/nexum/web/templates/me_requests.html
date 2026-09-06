@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Time off</h1><nav class="subnav"><a href="/me">Overview</a><a href="/me/time">Time</a><a href="/me/pay">Pay</a><a href="/me/requests" class="active">Time off</a></nav></div>
+<div class="page-head"><h1>Time off</h1>{% include "_me_nav.html" %}</div>
 <div class="columns wide-left">
   <section class="card">
     <table><thead><tr><th>Kind</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Reason</th></tr></thead><tbody>

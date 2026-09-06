@@ -10,12 +10,15 @@ from typing import Annotated, Any
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
 from nexum.models import (
+    AvailabilityKind,
     EmploymentType,
     NotificationLevel,
     PayPeriodStatus,
     PayType,
     Role,
     RunStatus,
+    ShiftRequestKind,
+    ShiftRequestStatus,
     ShiftStatus,
     TimeEntryStatus,
     TimeOffKind,
@@ -89,6 +92,43 @@ class EmployeeIn(BaseModel):
     currency: str = Field(default="SEK", min_length=3, max_length=3)
     login_password: str | None = Field(default=None, min_length=8)
     role: Role = Role.EMPLOYEE
+    skills: list[str] = Field(default_factory=list)
+
+
+class EmployeePatch(BaseModel):
+    first_name: str | None = Field(default=None, min_length=1, max_length=100)
+    last_name: str | None = Field(default=None, min_length=1, max_length=100)
+    title: str | None = None
+    department_id: int | None = None
+    employment_type: EmploymentType | None = None
+    pay_type: PayType | None = None
+    monthly_salary: Decimal | None = None
+    hourly_rate: Decimal | None = None
+    weekly_hours: Decimal | None = None
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
+    skills: list[str] | None = None
+    role: Role | None = None
+
+
+class AvailabilityIn(BaseModel):
+    weekday: int = Field(ge=0, le=6)
+    start_time: time
+    end_time: time
+    kind: AvailabilityKind = AvailabilityKind.UNAVAILABLE
+    note: str | None = Field(default=None, max_length=200)
+
+
+class AvailabilityOut(ORMModel):
+    id: int
+    weekday: int
+    start_time: time
+    end_time: time
+    kind: AvailabilityKind
+    note: str | None
+
+
+class SkillsIn(BaseModel):
+    skills: list[str]
 
 
 class EmployeeOut(ORMModel):
@@ -109,6 +149,7 @@ class EmployeeOut(ORMModel):
     start_date: date
     end_date: date | None
     is_active: bool
+    skill_names: list[str] = Field(default_factory=list)
 
 
 class TimeOffIn(BaseModel):
@@ -147,6 +188,7 @@ class ShiftIn(BaseModel):
     role_label: str | None = None
     status: ShiftStatus = ShiftStatus.DRAFT
     notes: str | None = None
+    required_skill: str | None = None
 
 
 class ShiftOut(ORMModel):
@@ -160,10 +202,32 @@ class ShiftOut(ORMModel):
     status: ShiftStatus
     notes: str | None
     template_id: int | None
+    required_skill_name: str | None = None
+
+
+class ShiftRequestIn(BaseModel):
+    kind: ShiftRequestKind
+    shift_id: int
+    target_employee_id: int | None = None
+    note: str | None = None
+
+
+class ShiftRequestOut(ORMModel):
+    id: int
+    kind: ShiftRequestKind
+    status: ShiftRequestStatus
+    shift_id: int
+    employee_id: int
+    target_employee_id: int | None
+    note: str | None
+    decision_note: str | None
+    decided_at: datetime | None
+    created_at: datetime
 
 
 class AssignIn(BaseModel):
     employee_id: int
+    ignore_availability: bool = False
 
 
 class PublishIn(BaseModel):
@@ -190,6 +254,7 @@ class TemplateIn(BaseModel):
     end_time: time
     headcount: int = Field(default=1, ge=1)
     role_label: str | None = None
+    required_skill: str | None = None
 
 
 class TemplateOut(ORMModel):
@@ -201,6 +266,7 @@ class TemplateOut(ORMModel):
     end_time: time
     headcount: int
     role_label: str | None
+    required_skill_name: str | None = None
 
 
 # --- time tracking ------------------------------------------------------------------------

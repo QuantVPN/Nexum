@@ -28,7 +28,9 @@ def test_version() -> None:
 def test_init_db_installs_recipes(file_db: str) -> None:
     result = runner.invoke(app, ["init-db"])
     assert result.exit_code == 0, result.output
-    assert "Installed 15 automation recipe(s)" in result.output
+    from nexum.automation.recipes import RECIPES
+
+    assert f"Installed {len(RECIPES)} automation recipe(s)" in result.output
     result = runner.invoke(app, ["automations", "list"])
     assert result.exit_code == 0 and "daily at 06:30 UTC" in result.output
     assert runner.invoke(app, ["automations", "install-recipes", "--reset"]).exit_code == 0

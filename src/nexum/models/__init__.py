@@ -8,14 +8,24 @@ from nexum.models.notifications import Notification, NotificationLevel
 from nexum.models.org import Department
 from nexum.models.payroll import PayPeriod, PayPeriodStatus, Payslip
 from nexum.models.people import (
+    AvailabilityKind,
+    AvailabilityRule,
     Employee,
     EmploymentType,
     PayType,
+    Skill,
     TimeOffKind,
     TimeOffRequest,
     TimeOffStatus,
 )
-from nexum.models.scheduling import ScheduleTemplate, Shift, ShiftStatus
+from nexum.models.scheduling import (
+    ScheduleTemplate,
+    Shift,
+    ShiftRequest,
+    ShiftRequestKind,
+    ShiftRequestStatus,
+    ShiftStatus,
+)
 from nexum.models.time_tracking import TimeEntry, TimeEntryStatus
 
 __all__ = [
@@ -23,6 +33,8 @@ __all__ = [
     "AuditLog",
     "AutomationRule",
     "AutomationRun",
+    "AvailabilityKind",
+    "AvailabilityRule",
     "CompanySettings",
     "Department",
     "Employee",
@@ -38,7 +50,11 @@ __all__ = [
     "RunStatus",
     "ScheduleTemplate",
     "Shift",
+    "ShiftRequest",
+    "ShiftRequestKind",
+    "ShiftRequestStatus",
     "ShiftStatus",
+    "Skill",
     "TimeEntry",
     "TimeEntryStatus",
     "TimeOffKind",

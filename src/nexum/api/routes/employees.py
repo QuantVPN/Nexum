@@ -5,9 +5,16 @@ from datetime import date
 from fastapi import APIRouter, Query
 
 from nexum.api.deps import CurrentUser, DbSession, ManagerUser
-from nexum.api.schemas import EmployeeIn, EmployeeOut
+from nexum.api.schemas import (
+    AvailabilityIn,
+    AvailabilityOut,
+    EmployeeIn,
+    EmployeeOut,
+    EmployeePatch,
+    SkillsIn,
+)
 from nexum.errors import PermissionDeniedError
-from nexum.models import Role
+from nexum.models import Employee, Role, User
 from nexum.services import people
 from nexum.services.events import commit_and_dispatch
 
@@ -29,7 +36,11 @@ def list_employees(
 def create_employee(payload: EmployeeIn, db: DbSession, user: ManagerUser) -> EmployeeOut:
     if payload.role != Role.EMPLOYEE and not user.has_role(Role.ADMIN):
         raise PermissionDeniedError("Only admins can create manager or admin logins")
-    employee = people.create_employee(db, actor=user, **payload.model_dump())
+    data = payload.model_dump()
+    skills = data.pop("skills")
+    employee = people.create_employee(db, actor=user, **data)
+    if skills:
+        people.set_skills(db, employee, skills)
     commit_and_dispatch(db)
     return EmployeeOut.model_validate(employee)
 
@@ -42,6 +53,56 @@ def get_employee(employee_id: int, db: DbSession, user: CurrentUser) -> Employee
     ):
         raise PermissionDeniedError("You can only view your own record")
     return EmployeeOut.model_validate(employee)
+
+
+def _self_or_manager(user: User, employee: Employee) -> None:
+    if not user.has_role(Role.MANAGER) and (
+        user.employee is None or user.employee.id != employee.id
+    ):
+        raise PermissionDeniedError("You can only view your own record")
+
+
+@router.patch("/{employee_id}", response_model=EmployeeOut)
+def patch_employee(
+    employee_id: int, payload: EmployeePatch, db: DbSession, user: ManagerUser
+) -> EmployeeOut:
+    employee = people.get_employee(db, employee_id)
+    changes = payload.model_dump(exclude_unset=True)
+    skills = changes.pop("skills", None)
+    role = changes.pop("role", None)
+    if role is not None and not user.has_role(Role.ADMIN):
+        raise PermissionDeniedError("Only admins can change roles")
+    people.update_employee(db, employee, actor=user, skills=skills, role=role, **changes)
+    commit_and_dispatch(db)
+    return EmployeeOut.model_validate(employee)
+
+
+@router.put("/{employee_id}/skills", response_model=EmployeeOut)
+def put_skills(
+    employee_id: int, payload: SkillsIn, db: DbSession, user: ManagerUser
+) -> EmployeeOut:
+    employee = people.get_employee(db, employee_id)
+    people.set_skills(db, employee, payload.skills)
+    commit_and_dispatch(db)
+    return EmployeeOut.model_validate(employee)
+
+
+@router.get("/{employee_id}/availability", response_model=list[AvailabilityOut])
+def get_availability(employee_id: int, db: DbSession, user: CurrentUser) -> list[AvailabilityOut]:
+    employee = people.get_employee(db, employee_id)
+    _self_or_manager(user, employee)
+    return [AvailabilityOut.model_validate(r) for r in employee.availability]
+
+
+@router.put("/{employee_id}/availability", response_model=list[AvailabilityOut])
+def put_availability(
+    employee_id: int, payload: list[AvailabilityIn], db: DbSession, user: CurrentUser
+) -> list[AvailabilityOut]:
+    employee = people.get_employee(db, employee_id)
+    _self_or_manager(user, employee)
+    rules = people.replace_availability(db, employee, [r.model_dump() for r in payload])
+    commit_and_dispatch(db)
+    return [AvailabilityOut.model_validate(r) for r in rules]
 
 
 @router.post("/{employee_id}/deactivate", response_model=EmployeeOut)

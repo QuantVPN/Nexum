@@ -105,6 +105,9 @@ class AutomationEngine:
         with self._lock:
             due: list[int] = []
             with self._session_factory() as session:
+                from nexum.services.company import prime_timezone
+
+                prime_timezone(session)
                 stmt = select(AutomationRule).where(
                     AutomationRule.enabled.is_(True),
                     AutomationRule.trigger_type == TriggerType.SCHEDULE,

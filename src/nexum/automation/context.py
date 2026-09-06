@@ -10,7 +10,15 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from nexum.config import Settings
-from nexum.models import AutomationRule, Department, Employee, PayPeriod, Shift, TimeOffRequest
+from nexum.models import (
+    AutomationRule,
+    Department,
+    Employee,
+    PayPeriod,
+    Shift,
+    ShiftRequest,
+    TimeOffRequest,
+)
 from nexum.services.calendar import to_local
 from nexum.services.events import DomainEvent
 
@@ -100,6 +108,29 @@ def enrich(session: Session, payload: dict[str, Any]) -> dict[str, Any]:
                 "end_date": request.end_date.isoformat(),
                 "days": request.days,
                 "status": request.status.value,
+            }
+    shift_request_id = payload.get("shift_request_id")
+    if isinstance(shift_request_id, int):
+        shift_request = session.get(ShiftRequest, shift_request_id)
+        if shift_request is not None:
+            extra["shift_request"] = {
+                "id": shift_request.id,
+                "kind": shift_request.kind.value,
+                "status": shift_request.status.value,
+                "employee_name": shift_request.employee.full_name,
+                "target_name": (
+                    shift_request.target_employee.full_name if shift_request.target_employee else ""
+                ),
+                "note": shift_request.note or "",
+            }
+    target_id = payload.get("target_employee_id")
+    if isinstance(target_id, int):
+        target = session.get(Employee, target_id)
+        if target is not None:
+            extra["target"] = {
+                "id": target.id,
+                "full_name": target.full_name,
+                "email": target.email,
             }
     period_id = payload.get("period_id")
     if isinstance(period_id, int):

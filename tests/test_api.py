@@ -310,11 +310,13 @@ def test_dashboards(client: TestClient, company: Company) -> None:
 
 def test_automation_endpoints(client: TestClient, company: Company, recipes: None) -> None:
     login(client, "admin@nexum.test")
+    from nexum.automation.recipes import RECIPES
+
     rules = client.get("/api/v1/automations/rules").json()
-    assert len(rules) == 15 and all(r["enabled"] for r in rules)
+    assert len(rules) == len(RECIPES) and all(r["enabled"] for r in rules)
     assert len(client.get("/api/v1/automations/actions").json()) >= 15
     assert "shift.created" in client.get("/api/v1/automations/events").json()
-    assert client.get("/api/v1/automations/stats").json()["total_rules"] == 15
+    assert client.get("/api/v1/automations/stats").json()["total_rules"] == len(RECIPES)
     # create + validate
     bad = {
         "name": "Bad",

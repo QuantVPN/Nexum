@@ -52,4 +52,6 @@ def me(db: DbSession, employee: CurrentEmployee) -> dict[str, Any]:
         "current_estimate_gross": data["current_estimate"].gross_amount,
         "unread_notifications": data["unread_notifications"],
         "clocked_in": data["open_time_entry"] is not None,
+        "calendar_url": f"/calendar/{employee.calendar_token}.ics",
+        "claimable_shifts": data["claimable_count"],
     }

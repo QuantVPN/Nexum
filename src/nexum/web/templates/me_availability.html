@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>My availability</h1>{% include "_me_nav.html" %}</div>
+<p class="muted">Auto-assignment and shift claims respect "unavailable" rules and prefer "preferred" windows. Managers see these rules when planning.</p>
+<div class="columns wide-left">
+  <section class="card">
+    <table><thead><tr><th>Day</th><th>From</th><th>To</th><th>Kind</th><th>Note</th><th></th></tr></thead><tbody>
+    {% for r in rules %}
+      <tr><td>{{ r.weekday|weekday }}</td><td>{{ r.start_time.strftime('%H:%M') }}</td><td>{{ r.end_time.strftime('%H:%M') }}</td><td><span class="badge badge-{{ 'rejected' if r.kind.value == 'unavailable' else 'approved' }}">{{ r.kind.value }}</span></td><td class="muted">{{ r.note or '' }}</td>
+      <td><form method="post" action="/me/availability/{{ r.id }}/delete">{{ csrf_input }}<button class="btn btn-xs btn-ghost">remove</button></form></td></tr>
+    {% else %}<tr><td colspan="6" class="muted">No rules: you are available any time.</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+  <section class="card">
+    <h2>Add a rule</h2>
+    <form method="post" action="/me/availability" class="stack">{{ csrf_input }}
+      <label>Kind <select name="kind">{% for k in kinds %}<option value="{{ k }}">{{ k }}</option>{% endfor %}</select></label>
+      <div class="row"><label>From <input type="time" name="start_time" value="00:00" required></label><label>To <input type="time" name="end_time" value="12:00" required></label></div>
+      <fieldset class="weekdays"><legend>Weekdays</legend>
+        {% for i in range(7) %}<label class="check"><input type="checkbox" name="weekdays" value="{{ i }}"> {{ i|weekday }}</label>{% endfor %}
+      </fieldset>
+      <label>Note <input name="note" placeholder="e.g. school run"></label>
+      <button class="btn btn-primary">Add rule</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

@@ -5,12 +5,12 @@
 <div class="columns wide-left">
   <section class="card">
     <table>
-      <thead><tr><th>Day</th><th>Time</th><th>Department</th><th>Name</th><th>Role</th><th>Headcount</th><th></th></tr></thead>
+      <thead><tr><th>Day</th><th>Time</th><th>Department</th><th>Name</th><th>Role</th><th>Skill</th><th>Headcount</th><th></th></tr></thead>
       <tbody>
       {% for t in templates_ %}
-        <tr><td>{{ t.weekday|weekday }}</td><td>{{ t.start_time.strftime('%H:%M') }}–{{ t.end_time.strftime('%H:%M') }}</td><td>{{ t.department.name }}</td><td>{{ t.name }}</td><td>{{ t.role_label or '—' }}</td><td>{{ t.headcount }}</td>
+        <tr><td>{{ t.weekday|weekday }}</td><td>{{ t.start_time.strftime('%H:%M') }}–{{ t.end_time.strftime('%H:%M') }}</td><td>{{ t.department.name }}</td><td>{{ t.name }}</td><td>{{ t.role_label or '—' }}</td><td>{{ t.required_skill_name or '—' }}</td><td>{{ t.headcount }}</td>
         <td><form method="post" action="/templates/{{ t.id }}/delete">{{ csrf_input }}<button class="btn btn-xs btn-ghost">remove</button></form></td></tr>
-      {% else %}<tr><td colspan="7" class="muted">No templates yet.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="8" class="muted">No templates yet.</td></tr>{% endfor %}
       </tbody>
     </table>
   </section>
@@ -21,6 +21,7 @@
       <label>Name <input name="name" value="Day shift" required></label>
       <div class="row"><label>Start <input type="time" name="start_time" value="08:00" required></label><label>End <input type="time" name="end_time" value="17:00" required></label></div>
       <div class="row"><label>Headcount <input type="number" name="headcount" value="1" min="1"></label><label>Role <input name="role_label"></label></div>
+      <label>Required skill <input name="required_skill" placeholder="e.g. forklift (optional)"></label>
       <fieldset class="weekdays"><legend>Weekdays</legend>
         {% for i in range(7) %}<label class="check"><input type="checkbox" name="weekdays" value="{{ i }}" {{ 'checked' if i < 5 }}> {{ i|weekday }}</label>{% endfor %}
       </fieldset>

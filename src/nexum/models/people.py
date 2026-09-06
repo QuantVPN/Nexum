@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+import secrets
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, ForeignKey, String, Text
+from sqlalchemy import Boolean, Column, Date, ForeignKey, Integer, String, Table, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from nexum.db import Base
@@ -16,8 +17,39 @@ if TYPE_CHECKING:
     from nexum.models.identity import User
     from nexum.models.org import Department
     from nexum.models.payroll import Payslip
-    from nexum.models.scheduling import Shift
+    from nexum.models.scheduling import Shift, ShiftRequest
     from nexum.models.time_tracking import TimeEntry
+
+
+employee_skills = Table(
+    "employee_skills",
+    Base.metadata,
+    Column("employee_id", ForeignKey("employees.id", ondelete="CASCADE"), primary_key=True),
+    Column("skill_id", ForeignKey("skills.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class Skill(Base):
+    __tablename__ = "skills"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True)
+
+    employees: Mapped[list[Employee]] = relationship(
+        secondary=employee_skills, back_populates="skills"
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Skill {self.name}>"
+
+
+class AvailabilityKind(StrEnum):
+    UNAVAILABLE = "unavailable"
+    PREFERRED = "preferred"
+
+
+def new_calendar_token() -> str:
+    return secrets.token_urlsafe(24)
 
 
 class EmploymentType(StrEnum):
@@ -74,6 +106,7 @@ class Employee(Base):
     start_date: Mapped[date] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    calendar_token: Mapped[str] = mapped_column(String(48), unique=True, default=new_calendar_token)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     user: Mapped[User | None] = relationship(back_populates="employee")
@@ -90,6 +123,23 @@ class Employee(Base):
     payslips: Mapped[list[Payslip]] = relationship(
         back_populates="employee", cascade="all, delete-orphan"
     )
+    skills: Mapped[list[Skill]] = relationship(
+        secondary=employee_skills, back_populates="employees"
+    )
+    availability: Mapped[list[AvailabilityRule]] = relationship(
+        back_populates="employee",
+        cascade="all, delete-orphan",
+        order_by="AvailabilityRule.weekday, AvailabilityRule.start_time",
+    )
+    shift_requests: Mapped[list[ShiftRequest]] = relationship(
+        back_populates="employee",
+        foreign_keys="ShiftRequest.employee_id",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def skill_names(self) -> list[str]:
+        return sorted(s.name for s in self.skills)
 
     @property
     def full_name(self) -> str:
@@ -122,3 +172,21 @@ class TimeOffRequest(Base):
     @property
     def days(self) -> int:
         return (self.end_date - self.start_date).days + 1
+
+
+class AvailabilityRule(Base):
+    """Recurring weekly availability: 'unavailable Mondays 00:00-12:00', 'prefers evenings'."""
+
+    __tablename__ = "availability_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"))
+    weekday: Mapped[int] = mapped_column(Integer)  # 0 = Monday
+    start_time: Mapped[time] = mapped_column(Time)
+    end_time: Mapped[time] = mapped_column(Time)  # end <= start means "until the next day"
+    kind: Mapped[AvailabilityKind] = mapped_column(
+        str_enum(AvailabilityKind, "availability_kind"), default=AvailabilityKind.UNAVAILABLE
+    )
+    note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    employee: Mapped[Employee] = relationship(back_populates="availability")

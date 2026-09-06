@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Edit {{ employee.full_name }}</h1><a class="btn btn-sm" href="/employees/{{ employee.id }}">Back</a></div>
+<section class="card">
+  <form method="post" action="/employees/{{ employee.id }}/edit" class="stack">{{ csrf_input }}
+    <div class="row"><label>First name <input name="first_name" value="{{ employee.first_name }}" required></label><label>Last name <input name="last_name" value="{{ employee.last_name }}" required></label></div>
+    <div class="row">
+      <label>Department <select name="department_id"><option value="">—</option>{% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if d.id == employee.department_id }}>{{ d.name }}</option>{% endfor %}</select></label>
+      <label>Title <input name="title" value="{{ employee.title or '' }}"></label>
+    </div>
+    <div class="row">
+      <label>Employment <select name="employment_type">{% for t in employment_types %}<option value="{{ t }}" {{ 'selected' if t == employee.employment_type.value }}>{{ t.replace('_',' ') }}</option>{% endfor %}</select></label>
+      <label>Pay type <select name="pay_type">{% for t in pay_types %}<option value="{{ t }}" {{ 'selected' if t == employee.pay_type.value }}>{{ t }}</option>{% endfor %}</select></label>
+      <label>Weekly hours <input name="weekly_hours" value="{{ employee.weekly_hours }}"></label>
+    </div>
+    <div class="row">
+      <label>Monthly salary <input name="monthly_salary" value="{{ employee.monthly_salary }}"></label>
+      <label>Hourly rate <input name="hourly_rate" value="{{ employee.hourly_rate }}"></label>
+    </div>
+    <label>Skills (comma separated) <input name="skills" value="{{ employee.skill_names|join(', ') }}" placeholder="forklift, first aid, cash desk"></label>
+    {% if employee.user and current_user.has_role(Role.ADMIN) %}
+    <label>Login role <select name="role">{% for r in roles %}<option value="{{ r }}" {{ 'selected' if r == employee.user.role.value }}>{{ r }}</option>{% endfor %}</select></label>
+    {% endif %}
+    <button class="btn btn-primary">Save</button>
+  </form>
+</section>
+{% endblock %}

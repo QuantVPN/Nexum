@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>{{ employee.full_name }}</h1><a class="btn btn-sm" href="/employees">All employees</a></div>
+<div class="page-head"><h1>{{ employee.full_name }}</h1><div class="row"><a class="btn btn-sm btn-primary" href="/employees/{{ employee.id }}/edit">Edit</a><a class="btn btn-sm" href="/employees">All employees</a></div></div>
 <div class="columns">
   <section class="card">
     <h2>Profile</h2>
@@ -12,6 +12,8 @@
       <dt>Pay</dt><dd>{% if employee.pay_type.value == 'hourly' %}{{ employee.hourly_rate|money(employee.currency) }} per hour{% else %}{{ employee.monthly_salary|money(employee.currency) }} per month{% endif %}</dd>
       <dt>Started</dt><dd>{{ employee.start_date|d }}{% if employee.end_date %} · ended {{ employee.end_date|d }}{% endif %}</dd>
       <dt>Login</dt><dd>{% if employee.user %}{{ employee.user.role.value }} · last login {{ employee.user.last_login_at|dt }}{% else %}none{% endif %}</dd>
+      <dt>Skills</dt><dd>{% for s in employee.skill_names %}<span class="badge">{{ s }}</span> {% else %}—{% endfor %}</dd>
+      <dt>Availability</dt><dd>{% for r in employee.availability %}<span class="badge badge-{{ 'rejected' if r.kind.value == 'unavailable' else 'approved' }}">{{ r.weekday|weekday }} {{ r.start_time.strftime('%H:%M') }}–{{ r.end_time.strftime('%H:%M') }} {{ r.kind.value }}</span> {% else %}any time{% endfor %}</dd>
     </dl>
   </section>
   <section class="card">

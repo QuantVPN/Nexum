@@ -1,0 +1,5 @@
+<nav class="subnav">
+  {% for href, label in [("/me", "Overview"), ("/me/shifts", "Shifts"), ("/me/time", "Time"), ("/me/pay", "Pay"), ("/me/requests", "Time off"), ("/me/availability", "Availability")] %}
+    <a href="{{ href }}" class="{{ 'active' if request.url.path == href }}">{{ label }}</a>
+  {% endfor %}
+</nav>

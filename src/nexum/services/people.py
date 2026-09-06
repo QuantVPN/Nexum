@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-from datetime import date
+from collections.abc import Iterable
+from datetime import date, time
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nexum.errors import ConflictError, NotFoundError, ValidationError
 from nexum.models import (
+    AvailabilityKind,
+    AvailabilityRule,
     Department,
     Employee,
     EmploymentType,
     PayType,
     Role,
+    Skill,
     TimeOffKind,
     TimeOffRequest,
     TimeOffStatus,
@@ -294,3 +299,147 @@ def approved_time_off_days(
 
 def is_on_time_off(session: Session, employee_id: int, day: date) -> bool:
     return day in approved_time_off_days(session, employee_id, day, day)
+
+
+# --- skills ------------------------------------------------------------------------------------
+
+
+def normalize_skill(name: str) -> str:
+    return " ".join(name.strip().split()).lower()
+
+
+def get_or_create_skill(session: Session, name: str) -> Skill:
+    key = normalize_skill(name)
+    if not key:
+        raise ValidationError("Skill name cannot be empty")
+    skill = session.scalar(select(Skill).where(Skill.name == key))
+    if skill is None:
+        skill = Skill(name=key)
+        session.add(skill)
+        session.flush()
+    return skill
+
+
+def list_skills(session: Session) -> list[Skill]:
+    return list(session.scalars(select(Skill).order_by(Skill.name)))
+
+
+def parse_skill_names(text: str | None) -> list[str]:
+    return [part for part in (normalize_skill(p) for p in (text or "").split(",")) if part]
+
+
+def set_skills(session: Session, employee: Employee, names: Iterable[str]) -> list[Skill]:
+    wanted = {normalize_skill(n) for n in names if normalize_skill(n)}
+    employee.skills = [get_or_create_skill(session, n) for n in sorted(wanted)]
+    session.flush()
+    return list(employee.skills)
+
+
+# --- availability ------------------------------------------------------------------------------
+
+
+def add_availability(
+    session: Session,
+    employee: Employee,
+    *,
+    weekday: int,
+    start_time: time,
+    end_time: time,
+    kind: AvailabilityKind = AvailabilityKind.UNAVAILABLE,
+    note: str | None = None,
+) -> AvailabilityRule:
+    if not 0 <= weekday <= 6:
+        raise ValidationError("weekday must be 0 (Monday) .. 6 (Sunday)")
+    rule = AvailabilityRule(
+        employee_id=employee.id,
+        weekday=weekday,
+        start_time=start_time,
+        end_time=end_time,
+        kind=kind,
+        note=(note or "").strip() or None,
+    )
+    employee.availability.append(rule)
+    session.flush()
+    return rule
+
+
+def remove_availability(session: Session, rule: AvailabilityRule) -> None:
+    session.delete(rule)
+    session.flush()
+
+
+def replace_availability(
+    session: Session, employee: Employee, rules: Iterable[dict[str, Any]]
+) -> list[AvailabilityRule]:
+    for existing in list(employee.availability):
+        session.delete(existing)
+    employee.availability = []
+    session.flush()
+    created: list[AvailabilityRule] = []
+    for spec in rules:
+        created.append(
+            add_availability(
+                session,
+                employee,
+                weekday=int(spec["weekday"]),
+                start_time=time.fromisoformat(str(spec.get("start_time", "00:00"))),
+                end_time=time.fromisoformat(str(spec.get("end_time", "00:00"))),
+                kind=AvailabilityKind(str(spec.get("kind", "unavailable"))),
+                note=spec.get("note"),
+            )
+        )
+    return created
+
+
+# --- editing ---------------------------------------------------------------------------------
+
+EMPLOYEE_EDITABLE: tuple[str, ...] = (
+    "first_name",
+    "last_name",
+    "title",
+    "department_id",
+    "employment_type",
+    "pay_type",
+    "monthly_salary",
+    "hourly_rate",
+    "weekly_hours",
+    "currency",
+)
+
+
+def update_employee(
+    session: Session,
+    employee: Employee,
+    *,
+    actor: User | None = None,
+    skills: Iterable[str] | None = None,
+    role: Role | None = None,
+    **fields: Any,
+) -> Employee:
+    unknown = set(fields) - set(EMPLOYEE_EDITABLE)
+    if unknown:
+        raise ValidationError(f"Cannot edit: {', '.join(sorted(unknown))}")
+    if "department_id" in fields and fields["department_id"] is not None:
+        get_department(session, int(fields["department_id"]))
+    for key, value in fields.items():
+        setattr(employee, key, value)
+    if employee.pay_type == PayType.HOURLY and employee.hourly_rate <= 0:
+        raise ValidationError("Hourly employees need an hourly rate above zero")
+    if employee.pay_type == PayType.MONTHLY and employee.monthly_salary <= 0:
+        raise ValidationError("Monthly employees need a monthly salary above zero")
+    if skills is not None:
+        set_skills(session, employee, skills)
+    if role is not None and employee.user is not None:
+        employee.user.role = role
+    if employee.user is not None:
+        employee.user.full_name = employee.full_name
+    session.flush()
+    audit.record(
+        session,
+        "employee.updated",
+        "employee",
+        employee.id,
+        actor=actor,
+        fields=sorted(fields),
+    )
+    return employee

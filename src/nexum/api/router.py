@@ -12,6 +12,7 @@ from nexum.api.routes import (
     org,
     payroll,
     schedule,
+    shift_requests,
     time,
     timeoff,
 )
@@ -23,6 +24,7 @@ for module in (
     org,
     employees,
     schedule,
+    shift_requests,
     timeoff,
     time,
     payroll,

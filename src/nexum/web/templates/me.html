@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Hi {{ o.employee.first_name }}</h1><nav class="subnav"><a href="/me" class="active">Overview</a><a href="/me/time">Time</a><a href="/me/pay">Pay</a><a href="/me/requests">Time off</a></nav></div>
+<div class="page-head"><h1>Hi {{ o.employee.first_name }}</h1>{% include "_me_nav.html" %}</div>
 <section class="tiles">
   <div class="tile"><span class="label">Next shift</span><span class="value">{% if o.next_shift %}{{ o.next_shift.starts_at|dt }}{% else %}—{% endif %}</span><span class="sub">{% if o.next_shift %}until {{ o.next_shift.ends_at|t }} · {{ o.next_shift.department.name }}{% else %}nothing scheduled{% endif %}</span></div>
   <div class="tile"><span class="label">This week</span><span class="value">{{ o.week_hours|hours }}</span><span class="sub">of {{ o.weekly_hours_target }} h</span></div>
@@ -26,4 +26,5 @@
     <a class="btn btn-sm" href="/me/requests">Request time off</a>
   </section>
 </div>
+{% if o.claimable_count %}<p class="flash flash-success">{{ o.claimable_count }} open shift(s) you could claim · <a href="/me/shifts">see them</a></p>{% endif %}
 {% endblock %}

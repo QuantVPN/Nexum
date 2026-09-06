@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import random
 from datetime import date, time, timedelta
 from decimal import Decimal
@@ -95,7 +96,9 @@ def seed(
     from nexum.automation import get_engine
     from nexum.automation.recipes import install_recipes
     from nexum.db import init_db, session_scope
+    from nexum.errors import NexumError
     from nexum.models import (
+        AvailabilityKind,
         EmploymentType,
         PayType,
         Role,
@@ -291,6 +294,48 @@ def seed(
                 status=status,
             )
 
+        # Skills, availability and a few self-service requests
+        people.set_skills(session, employees[6], ["forklift", "first aid"])
+        people.set_skills(session, employees[7], ["forklift"])
+        people.set_skills(session, employees[3], ["phones", "chat"])
+        people.add_availability(
+            session,
+            employees[0],
+            weekday=4,
+            start_time=time(14),
+            end_time=time(23, 59),
+            note="picks up kids Fridays",
+        )
+        people.add_availability(
+            session,
+            employees[5],
+            weekday=0,
+            start_time=time(6),
+            end_time=time(12),
+            kind=AvailabilityKind.PREFERRED,
+            note="early bird",
+        )
+        upcoming = [
+            s
+            for s in scheduling.list_shifts(
+                session,
+                now + timedelta(days=2),
+                now + timedelta(days=12),
+                statuses=(ShiftStatus.PUBLISHED,),
+            )
+            if s.employee_id is not None
+        ]
+        if upcoming and upcoming[0].employee is not None:
+            with contextlib.suppress(NexumError):
+                scheduling.request_drop(
+                    session, upcoming[0].employee, upcoming[0], note="dentist appointment"
+                )
+        open_soon = scheduling.open_shifts(session, now, now + timedelta(days=12))
+        for shift in open_soon[:1]:
+            for candidate in scheduling.candidate_employees(session, shift)[:1]:
+                with contextlib.suppress(NexumError):
+                    scheduling.request_claim(session, candidate, shift, note="I can take this")
+
         people.request_time_off(
             session,
             employees[0],
@@ -326,9 +371,12 @@ def automations_list() -> None:
     from nexum.automation import schedule as schedule_rules
     from nexum.db import init_db, session_scope
     from nexum.models import AutomationRule, TriggerType
+    from nexum.services.calendar import to_local
+    from nexum.services.company import prime_timezone
 
     init_db()
     with session_scope() as session:
+        prime_timezone(session)
         rules = session.scalars(select(AutomationRule).order_by(AutomationRule.id)).all()
         if not rules:
             typer.echo("No rules. Run `nexum init-db` to install the built-in recipes.")
@@ -341,7 +389,7 @@ def automations_list() -> None:
                 trigger = f"on {rule.event_name}"
             else:
                 trigger = "manual"
-            nxt = rule.next_run_at.strftime("%Y-%m-%d %H:%M") if rule.next_run_at else "-"
+            nxt = to_local(rule.next_run_at).strftime("%Y-%m-%d %H:%M") if rule.next_run_at else "-"
             typer.echo(
                 f"[{state}] #{rule.id:<3} {rule.name:<50} {trigger:<32} "
                 f"runs={rule.run_count:<4} next={nxt}"

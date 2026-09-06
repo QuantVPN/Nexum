@@ -84,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logging.basicConfig(
                 level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
             )
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         init_db()
         with session_scope() as session:
             company.prime_timezone(session)

@@ -28,6 +28,18 @@
   </section>
 </div>
 <section class="card">
+  <h2>Shift requests <span class="badge">{{ shift_requests|length }}</span></h2>
+  <table><thead><tr><th>Employee</th><th>Kind</th><th>Shift</th><th>To</th><th>Note</th><th></th></tr></thead><tbody>
+  {% for r in shift_requests %}
+    <tr><td>{{ r.employee.full_name }}</td><td>{{ r.kind.value }}</td><td>{{ r.shift.starts_at|dt }}–{{ r.shift.ends_at|t }} · {{ r.shift.department.name }}</td><td>{{ r.target_employee.full_name if r.target_employee else '—' }}</td><td class="muted">{{ r.note or '' }}</td>
+    <td class="row tight">
+      <form method="post" action="/shift-requests/{{ r.id }}/decide">{{ csrf_input }}<input type="hidden" name="decision" value="approve"><button class="btn btn-xs btn-primary">Approve</button></form>
+      <form method="post" action="/shift-requests/{{ r.id }}/decide">{{ csrf_input }}<input type="hidden" name="decision" value="reject"><button class="btn btn-xs btn-ghost">Reject</button></form>
+    </td></tr>
+  {% else %}<tr><td colspan="6" class="muted">No pending shift requests.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+<section class="card">
   <h2>Shifts without a time entry (last 14 days) <span class="badge">{{ missing|length }}</span></h2>
   <ul class="list compact">{% for s in missing %}<li>{{ s.employee.full_name }} · {{ s.starts_at|dt }}–{{ s.ends_at|t }} · {{ s.department.name }}</li>{% else %}<li class="muted">All finished shifts have time entries.</li>{% endfor %}</ul>
 </section>

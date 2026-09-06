@@ -27,6 +27,8 @@ from nexum.models import (
     PayPeriodStatus,
     Role,
     Shift,
+    ShiftRequestKind,
+    ShiftRequestStatus,
     TimeOffStatus,
 )
 from nexum.services import notifications, payroll, people, scheduling, time_tracking
@@ -140,7 +142,10 @@ def notify_role(ctx: RunContext, **params: Any) -> ActionResult:
 )
 def notify_employee(ctx: RunContext, **params: Any) -> ActionResult:
     mapping = ctx.as_mapping()
-    employee_id = params.get("employee_id") or mapping.get("event", {}).get("employee_id")
+    employee_id: Any = params.get("employee_id") or mapping.get("event", {}).get("employee_id")
+    if isinstance(employee_id, str):  # e.g. "{event.target_employee_id}"
+        rendered = render(employee_id, mapping).strip()
+        employee_id = int(rendered) if rendered.isdigit() else None
     if not isinstance(employee_id, int):
         return ActionResult("no employee referenced; nothing sent")
     employee = ctx.session.get(Employee, employee_id)
@@ -342,6 +347,38 @@ def flag_overtime(ctx: RunContext, **params: Any) -> ActionResult:
         source=source,
     )
     return ActionResult(f"flagged {len(flagged)} employee(s)", count=len(flagged), work_done=True)
+
+
+@action(
+    "auto_approve_shift_requests",
+    "Approve pending shift requests that cause no conflict (the event's request, or all pending).",
+    {"kinds": 'list of claim|drop|transfer (default ["claim"])'},
+)
+def auto_approve_shift_requests(ctx: RunContext, **params: Any) -> ActionResult:
+    kinds = {ShiftRequestKind(k) for k in params.get("kinds", ["claim"])}
+    if ctx.event is not None and isinstance(ctx.event.payload.get("shift_request_id"), int):
+        candidates = [
+            scheduling.get_shift_request(ctx.session, ctx.event.payload["shift_request_id"])
+        ]
+    else:
+        candidates = scheduling.list_shift_requests(ctx.session, status=ShiftRequestStatus.PENDING)
+    approved = 0
+    for request in candidates:
+        if request.kind not in kinds or request.status != ShiftRequestStatus.PENDING:
+            continue
+        try:
+            with ctx.session.begin_nested():
+                scheduling.decide_shift_request(
+                    ctx.session, request, approve=True, note="auto-approved: no conflicts"
+                )
+        except NexumError as exc:
+            ctx.say(f"left request #{request.id} for a manager: {exc}")
+            continue
+        approved += 1
+        ctx.say(f"approved {request.kind.value} #{request.id} by {request.employee.full_name}")
+    return ActionResult(
+        f"auto-approved {approved} request(s)", count=approved, work_done=approved > 0
+    )
 
 
 # --- time & attendance ----------------------------------------------------------------------

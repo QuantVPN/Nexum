@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -30,11 +30,14 @@ from nexum.errors import (
 from nexum.models import (
     AutomationRule,
     AutomationRun,
+    AvailabilityKind,
+    AvailabilityRule,
     Employee,
     EmploymentType,
     PayType,
     Role,
     ScheduleTemplate,
+    ShiftRequestStatus,
     ShiftStatus,
     TimeEntry,
     TimeEntryStatus,
@@ -49,6 +52,7 @@ from nexum.services import (
     audit,
     company,
     dashboard,
+    ical,
     mailer,
     notifications,
     payroll,
@@ -293,6 +297,7 @@ def employee_create(
     weekly_hours: FormOptStr = None,
     login_password: FormOptStr = None,
     role: FormStr = "employee",
+    skills: FormOptStr = None,
 ) -> Response:
     def work() -> str:
         wanted_role = Role(role)
@@ -315,6 +320,8 @@ def employee_create(
             role=wanted_role,
             actor=user,
         )
+        if skills:
+            people.set_skills(db, employee, people.parse_skill_names(skills))
         return f"{employee.full_name} added"
 
     return guarded(request, db, "/employees", work)
@@ -341,6 +348,67 @@ def employee_detail(
         o=overview,
         entries=recent_entries,
     )
+
+
+@web_router.get("/employees/{employee_id}/edit", response_class=HTMLResponse)
+def employee_edit(request: Request, db: DbSession, user: ManagerUser, employee_id: int) -> Response:
+    employee = people.get_employee(db, employee_id)
+    return render(
+        request,
+        "employee_edit.html",
+        db=db,
+        user=user,
+        title=f"Edit {employee.full_name}",
+        employee=employee,
+        departments=people.list_departments(db),
+        employment_types=EmploymentType.choices(),
+        pay_types=PayType.choices(),
+        roles=[Role.EMPLOYEE.value, Role.MANAGER.value, Role.ADMIN.value],
+    )
+
+
+@web_router.post("/employees/{employee_id}/edit")
+def employee_update(
+    request: Request,
+    db: DbSession,
+    user: ManagerUser,
+    employee_id: int,
+    first_name: FormStr,
+    last_name: FormStr,
+    department_id: FormOptStr = None,
+    title: FormOptStr = None,
+    employment_type: FormStr = "full_time",
+    pay_type: FormStr = "monthly",
+    monthly_salary: FormOptStr = None,
+    hourly_rate: FormOptStr = None,
+    weekly_hours: FormOptStr = None,
+    skills: FormOptStr = None,
+    role: FormOptStr = None,
+) -> Response:
+    def work() -> str:
+        employee = people.get_employee(db, employee_id)
+        wanted_role = Role(role) if role else None
+        if wanted_role is not None and not user.has_role(Role.ADMIN):
+            wanted_role = None
+        people.update_employee(
+            db,
+            employee,
+            actor=user,
+            skills=people.parse_skill_names(skills),
+            role=wanted_role,
+            first_name=first_name.strip(),
+            last_name=last_name.strip(),
+            department_id=int(department_id) if department_id else None,
+            title=(title or "").strip() or None,
+            employment_type=EmploymentType(employment_type),
+            pay_type=PayType(pay_type),
+            monthly_salary=parse_decimal(monthly_salary, "Monthly salary"),
+            hourly_rate=parse_decimal(hourly_rate, "Hourly rate"),
+            weekly_hours=parse_decimal(weekly_hours, "Weekly hours", "40"),
+        )
+        return "Employee updated"
+
+    return guarded(request, db, f"/employees/{employee_id}", work)
 
 
 @web_router.post("/employees/{employee_id}/deactivate")
@@ -562,9 +630,13 @@ def template_create(
     weekdays: Annotated[list[int], Form()],
     headcount: FormInt = 1,
     role_label: FormOptStr = None,
+    required_skill: FormOptStr = None,
 ) -> Response:
     def work() -> str:
         department = people.get_department(db, department_id)
+        skill = None
+        if required_skill and required_skill.strip():
+            skill = people.get_or_create_skill(db, required_skill)
         for weekday in weekdays:
             scheduling.create_template(
                 db,
@@ -575,6 +647,7 @@ def template_create(
                 end_time=parse_time(end_time, "End"),
                 headcount=headcount,
                 role_label=(role_label or "").strip() or None,
+                required_skill=skill,
             )
         return f"Added template for {len(weekdays)} weekday(s)"
 
@@ -609,7 +682,27 @@ def approvals_page(request: Request, db: DbSession, user: ManagerUser) -> Respon
         time_off=people.list_time_off(db, status=TimeOffStatus.PENDING),
         entries=time_tracking.pending_entries(db),
         missing=time_tracking.shifts_missing_entries(db, utcnow() - timedelta(days=14), utcnow()),
+        shift_requests=scheduling.list_shift_requests(db, status=ShiftRequestStatus.PENDING),
     )
+
+
+@web_router.post("/shift-requests/{request_id}/decide")
+def shift_request_decide(
+    request: Request,
+    db: DbSession,
+    user: ManagerUser,
+    request_id: int,
+    decision: FormStr,
+    note: FormOptStr = None,
+) -> Response:
+    def work() -> str:
+        item = scheduling.get_shift_request(db, request_id)
+        scheduling.decide_shift_request(
+            db, item, approve=decision == "approve", actor=user, note=note
+        )
+        return f"{item.kind.value.title()} request {item.status.value}"
+
+    return guarded(request, db, "/approvals", work)
 
 
 @web_router.post("/time-off/{request_id}/decide")
@@ -999,6 +1092,162 @@ def me_clock_out(
         return f"Clocked out: {entry.worked_hours:.2f} h submitted for approval"
 
     return guarded(request, db, "/me", work)
+
+
+@web_router.get("/me/shifts", response_class=HTMLResponse)
+def me_shifts(request: Request, db: DbSession, user: CurrentUser) -> Response:
+    employee = _employee_or_notice(request, db, user)
+    if isinstance(employee, Response):
+        return employee
+    now = utcnow()
+    mine = scheduling.list_shifts(
+        db,
+        now,
+        now + timedelta(days=28),
+        employee_id=employee.id,
+        statuses=(ShiftStatus.PUBLISHED,),
+    )
+    pending = [
+        r
+        for r in scheduling.list_shift_requests(db, employee_id=employee.id, limit=50)
+        if r.status == ShiftRequestStatus.PENDING
+    ]
+    pending_shift_ids = {r.shift_id for r in pending}
+    colleagues = [
+        e
+        for e in people.list_employees(db, department_id=employee.department_id)
+        if e.id != employee.id
+    ]
+    return render(
+        request,
+        "me_shifts.html",
+        db=db,
+        user=user,
+        title="My shifts",
+        employee=employee,
+        mine=mine,
+        claimable=scheduling.claimable_shifts(db, employee, now, now + timedelta(days=14)),
+        pending=pending,
+        pending_shift_ids=pending_shift_ids,
+        history=scheduling.list_shift_requests(db, employee_id=employee.id, limit=10),
+        colleagues=colleagues,
+        calendar_url=f"/calendar/{employee.calendar_token}.ics",
+    )
+
+
+@web_router.post("/me/shifts/{shift_id}/{action}")
+def me_shift_request(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    shift_id: int,
+    action: str,
+    target_employee_id: FormOptStr = None,
+    note: FormOptStr = None,
+) -> Response:
+    def work() -> str:
+        if user.employee is None:
+            raise AuthenticationError("No employee record")
+        shift = scheduling.get_shift(db, shift_id)
+        if action == "claim":
+            scheduling.request_claim(db, user.employee, shift, note=note)
+            return "Claim sent; it is approved automatically when nothing conflicts"
+        if action == "drop":
+            scheduling.request_drop(db, user.employee, shift, note=note)
+            return "Drop request sent to your manager"
+        if action == "transfer":
+            if not target_employee_id:
+                raise ValidationError("Pick a colleague to hand the shift to")
+            target = people.get_employee(db, int(target_employee_id))
+            scheduling.request_transfer(db, user.employee, shift, target, note=note)
+            return f"Hand-over to {target.full_name} sent to your manager"
+        raise NotFoundError("Unknown request type")
+
+    return guarded(request, db, "/me/shifts", work)
+
+
+@web_router.post("/me/shift-requests/{request_id}/cancel")
+def me_shift_request_cancel(
+    request: Request, db: DbSession, user: CurrentUser, request_id: int
+) -> Response:
+    def work() -> str:
+        if user.employee is None:
+            raise AuthenticationError("No employee record")
+        scheduling.cancel_shift_request(
+            db, scheduling.get_shift_request(db, request_id), user.employee
+        )
+        return "Request cancelled"
+
+    return guarded(request, db, "/me/shifts", work)
+
+
+@web_router.get("/me/availability", response_class=HTMLResponse)
+def me_availability(request: Request, db: DbSession, user: CurrentUser) -> Response:
+    employee = _employee_or_notice(request, db, user)
+    if isinstance(employee, Response):
+        return employee
+    return render(
+        request,
+        "me_availability.html",
+        db=db,
+        user=user,
+        title="My availability",
+        employee=employee,
+        rules=employee.availability,
+        kinds=AvailabilityKind.choices(),
+    )
+
+
+@web_router.post("/me/availability")
+def me_availability_add(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    weekdays: Annotated[list[int], Form()],
+    start_time: FormStr,
+    end_time: FormStr,
+    kind: FormStr = "unavailable",
+    note: FormOptStr = None,
+) -> Response:
+    def work() -> str:
+        if user.employee is None:
+            raise AuthenticationError("No employee record")
+        for weekday in weekdays:
+            people.add_availability(
+                db,
+                user.employee,
+                weekday=weekday,
+                start_time=parse_time(start_time, "Start"),
+                end_time=parse_time(end_time, "End"),
+                kind=AvailabilityKind(kind),
+                note=note,
+            )
+        return f"Saved for {len(weekdays)} weekday(s)"
+
+    return guarded(request, db, "/me/availability", work)
+
+
+@web_router.post("/me/availability/{rule_id}/delete")
+def me_availability_delete(
+    request: Request, db: DbSession, user: CurrentUser, rule_id: int
+) -> Response:
+    def work() -> str:
+        rule = db.get(AvailabilityRule, rule_id)
+        if rule is None or user.employee is None or rule.employee_id != user.employee.id:
+            raise NotFoundError("Rule not found")
+        people.remove_availability(db, rule)
+        return "Rule removed"
+
+    return guarded(request, db, "/me/availability", work)
+
+
+@web_router.get("/calendar/{token}.ics")
+def calendar_feed(db: DbSession, token: str) -> Response:
+    employee = db.scalar(select(Employee).where(Employee.calendar_token == token))
+    if employee is None:
+        raise NotFoundError("Calendar not found")
+    body = ical.feed(db, employee)
+    return PlainTextResponse(body, media_type="text/calendar; charset=utf-8")
 
 
 @web_router.get("/me/pay", response_class=HTMLResponse)

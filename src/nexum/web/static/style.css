@@ -62,3 +62,10 @@ table.schedule td.over { color: var(--danger); font-weight: 600; } tr.open-row t
 .chip select { padding: 2px 4px; font-size: 11px; }
 .notifications li.unread { background: #f5f8ff; margin: 0 -16px; padding: 8px 16px; } .notifications li.level-warning strong a, .notifications li.level-warning strong { color: var(--warn); } .notifications li.level-critical strong { color: var(--danger); }
 details.run { border-bottom: 1px solid var(--line); padding: 6px 0; } details.run summary { cursor: pointer; }
+
+@media print {
+  .topbar, .toolbar, .footer, .flash, .btn, form, .subnav, details { display: none !important; }
+  body { background: #fff; font-size: 11px; } .container { padding: 0; max-width: none; }
+  .card { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
+  table.schedule th, table.schedule td { min-width: 0; padding: 3px; } .chip { padding: 2px 4px; }
+}

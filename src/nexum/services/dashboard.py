@@ -136,8 +136,10 @@ def employee_overview(
     estimate = payroll.calculate_payslip(session, employee, period)
     unread = notifications.unread_count(session, employee.user) if employee.user else 0
     open_entry = time_tracking.open_entry(session, employee.id)
+    claimable = scheduling.claimable_shifts(session, employee, now, now + timedelta(days=14))
     return {
         "employee": employee,
+        "claimable_count": len(claimable),
         "upcoming_shifts": upcoming,
         "next_shift": upcoming[0] if upcoming else None,
         "week_hours": week_hours,
