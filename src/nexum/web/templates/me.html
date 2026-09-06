@@ -8,10 +8,10 @@
   <div class="tile"><span class="label">Time clock</span>
     {% if o.open_time_entry %}
       <span class="value">Clocked in</span><span class="sub">since {{ o.open_time_entry.clock_in|dt }}</span>
-      <form method="post" action="/me/clock-out" class="row tight"><input type="number" name="break_minutes" value="0" min="0" title="Break minutes" style="width:5em"> <button class="btn btn-sm btn-primary">Clock out</button></form>
+      <form method="post" action="/me/clock-out" class="row tight">{{ csrf_input }}<input type="number" name="break_minutes" value="0" min="0" title="Break minutes" style="width:5em"> <button class="btn btn-sm btn-primary">Clock out</button></form>
     {% else %}
       <span class="value">Off</span>
-      <form method="post" action="/me/clock-in"><button class="btn btn-sm btn-primary">Clock in</button></form>
+      <form method="post" action="/me/clock-in">{{ csrf_input }}<button class="btn btn-sm btn-primary">Clock in</button></form>
     {% endif %}
   </div>
 </section>

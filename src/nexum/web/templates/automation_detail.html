@@ -4,10 +4,10 @@
   <h1>{{ rule.name }} {% if not rule.enabled %}<span class="badge badge-muted">disabled</span>{% endif %}</h1>
   <div class="row">
     <a class="btn btn-sm" href="/automations">All automations</a>
-    <form method="post" action="/automations/{{ rule.id }}/run"><button class="btn btn-sm btn-primary">Run now</button></form>
+    <form method="post" action="/automations/{{ rule.id }}/run">{{ csrf_input }}<button class="btn btn-sm btn-primary">Run now</button></form>
     {% if current_user.has_role(Role.ADMIN) %}
-      <form method="post" action="/automations/{{ rule.id }}/toggle"><button class="btn btn-sm">{{ 'Disable' if rule.enabled else 'Enable' }}</button></form>
-      <form method="post" action="/automations/{{ rule.id }}/delete" onsubmit="return confirm('Delete this rule and its history?')"><button class="btn btn-sm btn-ghost">Delete</button></form>
+      <form method="post" action="/automations/{{ rule.id }}/toggle">{{ csrf_input }}<button class="btn btn-sm">{{ 'Disable' if rule.enabled else 'Enable' }}</button></form>
+      <form method="post" action="/automations/{{ rule.id }}/delete" onsubmit="return confirm('Delete this rule and its history?')">{{ csrf_input }}<button class="btn btn-sm btn-ghost">Delete</button></form>
     {% endif %}
   </div>
 </div>

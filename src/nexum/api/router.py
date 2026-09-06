@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from nexum.api.routes import (
     auth,
     automations,
+    company,
     dashboard,
     employees,
     notifications,
@@ -18,6 +19,7 @@ from nexum.api.routes import (
 api_router = APIRouter()
 for module in (
     auth,
+    company,
     org,
     employees,
     schedule,

@@ -18,9 +18,14 @@ from nexum.models import (
     ShiftStatus,
     User,
 )
-from nexum.models.types import utcnow
 from nexum.services import audit
-from nexum.services.calendar import week_start, week_window
+from nexum.services.calendar import (
+    local_date,
+    local_datetime,
+    shift_days,
+    week_start,
+    week_window,
+)
 from nexum.services.events import emit
 from nexum.services.people import approved_time_off_days
 
@@ -75,7 +80,8 @@ def _assert_available(
         raise SchedulingConflict(
             f"{employee.full_name} already has a shift {clash.starts_at:%Y-%m-%d %H:%M}"
         )
-    off_days = approved_time_off_days(session, employee.id, starts_at.date(), ends_at.date())
+    days = shift_days(starts_at, ends_at)
+    off_days = approved_time_off_days(session, employee.id, days[0], days[-1])
     if off_days:
         raise SchedulingConflict(f"{employee.full_name} has approved time off on that day")
 
@@ -216,7 +222,7 @@ def publish_shifts(session: Session, shifts: Iterable[Shift], *, actor: User | N
             department_ids=sorted(departments),
             employee_ids=sorted(employees),
             shift_ids=shift_ids,
-            week_start=week_start(earliest.date()) if earliest else None,
+            week_start=week_start(local_date(earliest)) if earliest else None,
             starts_at=earliest,
             ends_at=latest,
         )
@@ -294,16 +300,15 @@ def candidate_employees(session: Session, shift: Shift) -> list[Employee]:
     stmt = select(Employee).where(Employee.is_active.is_(True))
     if shift.department_id is not None:
         stmt = stmt.where(Employee.department_id == shift.department_id)
-    ws, we = week_window(week_start(shift.starts_at.date()))
+    ws, we = week_window(week_start(local_date(shift.starts_at)))
+    days = shift_days(shift.starts_at, shift.ends_at)
     hours_this_week = week_hours_by_employee(session, ws, we)
     shift_hours = Decimal(str(round(shift.duration_hours, 2)))
     ranked: list[tuple[Decimal, str, Employee]] = []
     for employee in session.scalars(stmt):
         if overlapping_shift(session, employee.id, shift.starts_at, shift.ends_at, shift.id):
             continue
-        if approved_time_off_days(
-            session, employee.id, shift.starts_at.date(), shift.ends_at.date()
-        ):
+        if approved_time_off_days(session, employee.id, days[0], days[-1]):
             continue
         current = hours_this_week.get(employee.id, Decimal("0"))
         if current + shift_hours > employee.weekly_hours:
@@ -374,8 +379,8 @@ def generate_week_from_templates(
     created: list[Shift] = []
     for template in session.scalars(stmt):
         day = week_monday + timedelta(days=template.weekday)
-        starts_at = datetime.combine(day, template.start_time, tzinfo=utcnow().tzinfo)
-        ends_at = datetime.combine(day, template.end_time, tzinfo=utcnow().tzinfo)
+        starts_at = local_datetime(day, template.start_time)
+        ends_at = local_datetime(day, template.end_time)
         if ends_at <= starts_at:  # overnight shift
             ends_at += timedelta(days=1)
         existing = int(

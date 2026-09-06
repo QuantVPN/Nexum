@@ -5,9 +5,9 @@
   <div class="row">
     <a class="btn btn-sm" href="/payroll">All periods</a>
     {% if current_user.has_role(Role.ADMIN) %}
-      {% if period.status.value != 'paid' %}<form method="post" action="/payroll/{{ period.id }}/compute"><button class="btn btn-sm">Recompute</button></form>{% endif %}
-      {% if period.status.value == 'open' %}<form method="post" action="/payroll/{{ period.id }}/close" onsubmit="return confirm('Close this period? Payslips become final.')"><button class="btn btn-sm btn-primary">Close period</button></form>{% endif %}
-      {% if period.status.value == 'closed' %}<form method="post" action="/payroll/{{ period.id }}/pay"><button class="btn btn-sm btn-primary">Mark as paid</button></form>{% endif %}
+      {% if period.status.value != 'paid' %}<form method="post" action="/payroll/{{ period.id }}/compute">{{ csrf_input }}<button class="btn btn-sm">Recompute</button></form>{% endif %}
+      {% if period.status.value == 'open' %}<form method="post" action="/payroll/{{ period.id }}/close" onsubmit="return confirm('Close this period? Payslips become final.')">{{ csrf_input }}<button class="btn btn-sm btn-primary">Close period</button></form>{% endif %}
+      {% if period.status.value == 'closed' %}<form method="post" action="/payroll/{{ period.id }}/pay">{{ csrf_input }}<button class="btn btn-sm btn-primary">Mark as paid</button></form>{% endif %}
     {% endif %}
   </div>
 </div>

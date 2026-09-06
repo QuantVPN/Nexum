@@ -9,7 +9,7 @@
   </section>
   <section class="card">
     <h2>Report hours</h2>
-    <form method="post" action="/me/time/entries" class="stack">
+    <form method="post" action="/me/time/entries" class="stack">{{ csrf_input }}
       <label>For shift <select name="shift_id"><option value="">— not linked —</option>{% for s in recent_shifts %}<option value="{{ s.id }}">{{ s.starts_at|dt }}–{{ s.ends_at|t }}</option>{% endfor %}</select></label>
       <label>Clock in <input type="datetime-local" name="clock_in" required></label>
       <label>Clock out <input type="datetime-local" name="clock_out" required></label>

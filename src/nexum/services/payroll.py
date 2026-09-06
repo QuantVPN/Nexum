@@ -1,30 +1,31 @@
 """Payroll: pay periods and payslip computation.
 
-Rules (v0.1, see docs/PLAN.md for the roadmap towards localised rules):
+Rules come from company settings (:mod:`nexum.services.company`):
 
 * Hours per ISO week = approved time entries + published shifts that have no time entry.
 * Hours above the weekly overtime threshold count as overtime.
-* Monthly employees: base salary (pro-rated when the period is not a full month), minus
-  approved unpaid leave, plus overtime at ``hourly equivalent * multiplier``.
+* Monthly employees: base salary (pro-rated when the period is not a full month or a
+  bi-weekly period), minus approved unpaid leave, plus overtime at
+  ``hourly equivalent * multiplier``.
 * Hourly employees: regular hours * rate + overtime hours * rate * multiplier.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nexum.config import Settings, get_settings
 from nexum.errors import ConflictError, NotFoundError, ValidationError
 from nexum.models import (
     Employee,
     PayPeriod,
     PayPeriodStatus,
+    PayPeriodType,
     Payslip,
     PayType,
     ShiftStatus,
@@ -39,8 +40,10 @@ from nexum.services.calendar import (
     iter_weeks,
     month_bounds,
     period_window,
+    today,
     week_window,
 )
+from nexum.services.company import PayrollRules, get_company, payroll_rules
 from nexum.services.events import emit
 from nexum.services.people import approved_time_off_days, list_employees
 from nexum.services.scheduling import list_shifts
@@ -49,6 +52,29 @@ from nexum.services.time_tracking import entries_in_window
 CENT = Decimal("0.01")
 WEEKS_PER_MONTH = Decimal("52") / Decimal("12")
 WORKDAYS_PER_YEAR = Decimal("260")
+BIWEEKLY_PERIODS_PER_YEAR = Decimal("26")
+
+__all__ = [
+    "PayslipCalculation",
+    "WeekHours",
+    "calculate_payslip",
+    "close_period",
+    "compute_payslips",
+    "current_period",
+    "effective_hours_by_week",
+    "employees_in_period",
+    "get_or_create_period",
+    "get_period",
+    "hours",
+    "list_periods",
+    "mark_paid",
+    "money",
+    "payroll_rules",
+    "payslips_for_employee",
+    "period_totals",
+    "previous_period",
+    "reference_datetime",
+]
 
 
 def money(value: Decimal | float | int) -> Decimal:
@@ -97,16 +123,31 @@ def get_or_create_period(
     if existing is not None:
         return existing
     period = PayPeriod(
-        start_date=start, end_date=end, currency=currency or get_settings().default_currency
+        start_date=start, end_date=end, currency=currency or get_company(session).currency
     )
     session.add(period)
     session.flush()
     return period
 
 
-def current_period(session: Session, today: date | None = None) -> PayPeriod:
-    first, last = month_bounds(today or utcnow().date())
-    return get_or_create_period(session, first, last)
+def period_bounds_for(rules: PayrollRules, day: date) -> tuple[date, date]:
+    """Start/end of the pay period containing ``day`` under the company's period type."""
+    if rules.pay_period_type == PayPeriodType.BIWEEKLY and rules.biweekly_anchor is not None:
+        offset = (day - rules.biweekly_anchor).days % 14
+        start = day - timedelta(days=offset)
+        return start, start + timedelta(days=13)
+    return month_bounds(day)
+
+
+def current_period(session: Session, day: date | None = None) -> PayPeriod:
+    start, end = period_bounds_for(payroll_rules(session), day or today())
+    return get_or_create_period(session, start, end)
+
+
+def previous_period(session: Session, day: date | None = None) -> PayPeriod:
+    start, _ = period_bounds_for(payroll_rules(session), day or today())
+    prev_start, prev_end = period_bounds_for(payroll_rules(session), start - timedelta(days=1))
+    return get_or_create_period(session, prev_start, prev_end)
 
 
 def list_periods(session: Session, limit: int = 24) -> list[PayPeriod]:
@@ -115,10 +156,10 @@ def list_periods(session: Session, limit: int = 24) -> list[PayPeriod]:
 
 
 def effective_hours_by_week(
-    session: Session, employee: Employee, start: date, end: date, settings: Settings
+    session: Session, employee: Employee, start: date, end: date, rules: PayrollRules
 ) -> list[WeekHours]:
     p_start, p_end = period_window(start, end)
-    threshold = Decimal(str(settings.weekly_overtime_threshold_hours))
+    threshold = rules.weekly_overtime_threshold_hours
     weeks: list[WeekHours] = []
     for monday in iter_weeks(start, end):
         w_start, w_end = week_window(monday)
@@ -149,14 +190,24 @@ def effective_hours_by_week(
     return weeks
 
 
+def _monthly_proration(rules: PayrollRules, period: PayPeriod) -> Decimal:
+    month_first, month_last = month_bounds(period.start_date)
+    if period.start_date == month_first and period.end_date == month_last:
+        return Decimal("1")
+    period_days = days_between(period.start_date, period.end_date)
+    if rules.pay_period_type == PayPeriodType.BIWEEKLY and period_days == 14:
+        return Decimal("12") / BIWEEKLY_PERIODS_PER_YEAR
+    return Decimal(period_days) / Decimal(days_between(month_first, month_last))
+
+
 def calculate_payslip(
-    session: Session, employee: Employee, period: PayPeriod, settings: Settings | None = None
+    session: Session, employee: Employee, period: PayPeriod, rules: PayrollRules | None = None
 ) -> PayslipCalculation:
-    settings = settings or get_settings()
-    weeks = effective_hours_by_week(session, employee, period.start_date, period.end_date, settings)
+    rules = rules or payroll_rules(session)
+    weeks = effective_hours_by_week(session, employee, period.start_date, period.end_date, rules)
     regular = sum((w.regular for w in weeks), Decimal("0"))
     overtime = sum((w.overtime for w in weeks), Decimal("0"))
-    multiplier = Decimal(str(settings.overtime_multiplier))
+    multiplier = rules.overtime_multiplier
     details: dict[str, Any] = {
         "pay_type": employee.pay_type.value,
         "weeks": [
@@ -170,7 +221,7 @@ def calculate_payslip(
             for w in weeks
         ],
         "overtime_multiplier": str(multiplier),
-        "weekly_overtime_threshold_hours": str(settings.weekly_overtime_threshold_hours),
+        "weekly_overtime_threshold_hours": str(rules.weekly_overtime_threshold_hours),
     }
     adjustments = Decimal("0")
 
@@ -180,14 +231,7 @@ def calculate_payslip(
         overtime_amount = money(overtime * rate * multiplier)
         details["hourly_rate"] = str(rate)
     else:
-        month_first, month_last = month_bounds(period.start_date)
-        period_days = days_between(period.start_date, period.end_date)
-        month_days = days_between(month_first, month_last)
-        proration = (
-            Decimal("1")
-            if (period.start_date == month_first and period.end_date == month_last)
-            else Decimal(period_days) / Decimal(month_days)
-        )
+        proration = _monthly_proration(rules, period)
         base = money(employee.monthly_salary * proration)
         weekly_hours = employee.weekly_hours or Decimal("40")
         hourly_equivalent = employee.monthly_salary / (weekly_hours * WEEKS_PER_MONTH)
@@ -234,16 +278,16 @@ def compute_payslips(
     period: PayPeriod,
     *,
     actor: User | None = None,
-    settings: Settings | None = None,
+    rules: PayrollRules | None = None,
 ) -> list[Payslip]:
     if period.status == PayPeriodStatus.PAID:
         raise ConflictError("Pay period is already paid; payslips are frozen")
-    settings = settings or get_settings()
+    rules = rules or payroll_rules(session)
     existing = {p.employee_id: p for p in period.payslips}
     result: list[Payslip] = []
     total = Decimal("0")
     for employee in employees_in_period(session, period):
-        calc = calculate_payslip(session, employee, period, settings)
+        calc = calculate_payslip(session, employee, period, rules)
         slip = existing.get(employee.id)
         if slip is None:
             slip = Payslip(employee_id=employee.id)

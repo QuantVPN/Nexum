@@ -20,7 +20,7 @@ from nexum.models import (
 )
 from nexum.models.types import utcnow
 from nexum.services import audit, notifications, payroll, people, scheduling, time_tracking
-from nexum.services.calendar import week_start, week_window
+from nexum.services.calendar import local_date, week_start, week_window
 
 
 def automation_stats(session: Session, now: datetime | None = None) -> dict[str, Any]:
@@ -68,7 +68,7 @@ def automation_stats(session: Session, now: datetime | None = None) -> dict[str,
 
 def admin_overview(session: Session, now: datetime | None = None) -> dict[str, Any]:
     now = now or utcnow()
-    week_begin, week_end = week_window(week_start(now.date()))
+    week_begin, week_end = week_window(week_start(local_date(now)))
     next7_end = now + timedelta(days=7)
 
     employees = people.list_employees(session)
@@ -82,11 +82,12 @@ def admin_overview(session: Session, now: datetime | None = None) -> dict[str, A
     open_now = scheduling.open_shifts(session, now, next7_end)
     draft_count = sum(1 for s in week_shifts if s.status == ShiftStatus.DRAFT)
 
-    period = payroll.current_period(session, now.date())
+    period = payroll.current_period(session, local_date(now))
     period_totals = payroll.period_totals(period)
+    rules = payroll.payroll_rules(session)
     settings_estimate = Decimal("0")
     for emp in employees:
-        calc = payroll.calculate_payslip(session, emp, period)
+        calc = payroll.calculate_payslip(session, emp, period, rules)
         settings_estimate += calc.gross_amount
 
     pending_timeoff = people.list_time_off(session, status=TimeOffStatus.PENDING)
@@ -120,7 +121,7 @@ def employee_overview(
     session: Session, employee: Employee, now: datetime | None = None
 ) -> dict[str, Any]:
     now = now or utcnow()
-    week_begin, week_end = week_window(week_start(now.date()))
+    week_begin, week_end = week_window(week_start(local_date(now)))
     upcoming = scheduling.list_shifts(
         session,
         now,
@@ -131,7 +132,7 @@ def employee_overview(
     week_hours = scheduling.scheduled_hours(session, employee.id, week_begin, week_end)
     slips = payroll.payslips_for_employee(session, employee.id, limit=3)
     requests = people.list_time_off(session, employee_id=employee.id, limit=10)
-    period = payroll.current_period(session, now.date())
+    period = payroll.current_period(session, local_date(now))
     estimate = payroll.calculate_payslip(session, employee, period)
     unread = notifications.unread_count(session, employee.user) if employee.user else 0
     open_entry = time_tracking.open_entry(session, employee.id)
@@ -152,7 +153,7 @@ def employee_overview(
 
 def department_summary(session: Session, now: datetime | None = None) -> list[dict[str, Any]]:
     now = now or utcnow()
-    week_begin, week_end = week_window(week_start(now.date()))
+    week_begin, week_end = week_window(week_start(local_date(now)))
     rows: list[dict[str, Any]] = []
     for dept in session.scalars(select(Department).order_by(Department.name)):
         shifts = scheduling.list_shifts(session, week_begin, week_end, department_id=dept.id)

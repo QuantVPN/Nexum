@@ -21,8 +21,8 @@
       <td>{{ r.next_run_at|dt if r.trigger_type.value == 'schedule' and r.enabled else '—' }}</td>
       <td>{{ r.estimated_minutes_saved }} min</td>
       <td class="row tight">
-        <form method="post" action="/automations/{{ r.id }}/run"><button class="btn btn-xs">Run now</button></form>
-        {% if current_user.has_role(Role.ADMIN) %}<form method="post" action="/automations/{{ r.id }}/toggle"><button class="btn btn-xs btn-ghost">{{ 'Disable' if r.enabled else 'Enable' }}</button></form>{% endif %}
+        <form method="post" action="/automations/{{ r.id }}/run">{{ csrf_input }}<button class="btn btn-xs">Run now</button></form>
+        {% if current_user.has_role(Role.ADMIN) %}<form method="post" action="/automations/{{ r.id }}/toggle">{{ csrf_input }}<button class="btn btn-xs btn-ghost">{{ 'Disable' if r.enabled else 'Enable' }}</button></form>{% endif %}
       </td>
     </tr>
   {% else %}<tr><td colspan="8" class="muted">No rules. Run <code>nexum seed</code> or create one.</td></tr>{% endfor %}

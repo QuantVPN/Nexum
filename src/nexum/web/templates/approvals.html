@@ -8,8 +8,8 @@
     {% for r in time_off %}
       <tr><td>{{ r.employee.full_name }}</td><td>{{ r.kind.value }}</td><td>{{ r.start_date|d }} → {{ r.end_date|d }} ({{ r.days }} d)</td><td class="muted">{{ r.reason or '' }}</td>
       <td class="row tight">
-        <form method="post" action="/time-off/{{ r.id }}/decide"><input type="hidden" name="decision" value="approve"><button class="btn btn-xs btn-primary">Approve</button></form>
-        <form method="post" action="/time-off/{{ r.id }}/decide"><input type="hidden" name="decision" value="reject"><button class="btn btn-xs btn-ghost">Reject</button></form>
+        <form method="post" action="/time-off/{{ r.id }}/decide">{{ csrf_input }}<input type="hidden" name="decision" value="approve"><button class="btn btn-xs btn-primary">Approve</button></form>
+        <form method="post" action="/time-off/{{ r.id }}/decide">{{ csrf_input }}<input type="hidden" name="decision" value="reject"><button class="btn btn-xs btn-ghost">Reject</button></form>
       </td></tr>
     {% else %}<tr><td colspan="5" class="muted">Nothing waiting.</td></tr>{% endfor %}
     </tbody></table>
@@ -20,8 +20,8 @@
     {% for e in entries %}
       <tr><td>{{ e.employee.full_name }}</td><td>{{ e.clock_in|dt }}</td><td>{{ e.clock_out|dt }}</td><td>{{ '%.2f'|format(e.worked_hours) }}{% if e.break_minutes %} <small class="muted">(-{{ e.break_minutes }} min)</small>{% endif %}</td>
       <td class="row tight">
-        <form method="post" action="/time/entries/{{ e.id }}/decide"><input type="hidden" name="decision" value="approve"><button class="btn btn-xs btn-primary">Approve</button></form>
-        <form method="post" action="/time/entries/{{ e.id }}/decide"><input type="hidden" name="decision" value="reject"><button class="btn btn-xs btn-ghost">Reject</button></form>
+        <form method="post" action="/time/entries/{{ e.id }}/decide">{{ csrf_input }}<input type="hidden" name="decision" value="approve"><button class="btn btn-xs btn-primary">Approve</button></form>
+        <form method="post" action="/time/entries/{{ e.id }}/decide">{{ csrf_input }}<input type="hidden" name="decision" value="reject"><button class="btn btn-xs btn-ghost">Reject</button></form>
       </td></tr>
     {% else %}<tr><td colspan="5" class="muted">Nothing waiting.</td></tr>{% endfor %}
     </tbody></table>

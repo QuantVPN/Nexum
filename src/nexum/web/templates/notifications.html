@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Notifications</h1><form method="post" action="/notifications/read-all"><button class="btn btn-sm">Mark all read</button></form></div>
+<div class="page-head"><h1>Notifications</h1><form method="post" action="/notifications/read-all">{{ csrf_input }}<button class="btn btn-sm">Mark all read</button></form></div>
 <section class="card">
   <ul class="list notifications">
     {% for n in items %}

@@ -18,6 +18,7 @@
       <a href="/approvals" class="{{ 'active' if request.url.path.startswith('/approvals') }}">Approvals</a>
       <a href="/payroll" class="{{ 'active' if request.url.path.startswith('/payroll') }}">Payroll</a>
       <a href="/automations" class="{{ 'active' if request.url.path.startswith('/automations') }}">Automations</a>
+      {% if current_user.has_role(Role.ADMIN) %}<a href="/settings" class="{{ 'active' if request.url.path.startswith('/settings') }}">Settings</a>{% endif %}
     {% endif %}
     {% if current_user.employee %}
       <a href="/me" class="{{ 'active' if request.url.path.startswith('/me') }}">My page</a>
@@ -26,7 +27,7 @@
   <div class="user">
     <a href="/notifications" class="bell" title="Notifications">🔔{% if unread_count %}<span class="badge-count">{{ unread_count }}</span>{% endif %}</a>
     <span class="who">{{ current_user.full_name }} <small>({{ current_user.role.value }})</small></span>
-    <form method="post" action="/logout"><button class="btn btn-ghost btn-sm">Sign out</button></form>
+    <form method="post" action="/logout">{{ csrf_input }}<button class="btn btn-ghost btn-sm">Sign out</button></form>
   </div>
   {% endif %}
 </header>
@@ -36,6 +37,6 @@
   {% endfor %}
   {% block content %}{% endblock %}
 </main>
-<footer class="footer">{{ settings.app_name }} v{{ app_version }} · all times UTC</footer>
+<footer class="footer">{{ settings.app_name }} v{{ app_version }} · times shown in {{ timezone_name }}</footer>
 </body>
 </html>

@@ -66,6 +66,7 @@ CurrentEmployee = Annotated[Employee, Depends(current_employee)]
 
 
 def login(request: Request, user: User) -> None:
+    request.session.clear()  # new session id/CSRF token after authentication
     request.session[SESSION_USER_KEY] = user.id
 
 

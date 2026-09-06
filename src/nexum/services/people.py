@@ -22,6 +22,7 @@ from nexum.models import (
 )
 from nexum.models.types import utcnow
 from nexum.services import audit
+from nexum.services.calendar import today
 from nexum.services.events import emit
 from nexum.services.security import hash_password
 
@@ -171,7 +172,7 @@ def deactivate_employee(
     session: Session, employee: Employee, end_date: date | None = None, *, actor: User | None = None
 ) -> Employee:
     employee.is_active = False
-    employee.end_date = end_date or date.today()
+    employee.end_date = end_date or today()
     if employee.user is not None:
         employee.user.is_active = False
     audit.record(session, "employee.deactivated", "employee", employee.id, actor=actor)

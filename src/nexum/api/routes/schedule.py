@@ -18,16 +18,17 @@ from nexum.api.schemas import (
 )
 from nexum.errors import ValidationError
 from nexum.models import Role, ScheduleTemplate
-from nexum.models.types import as_utc, utcnow
+from nexum.models.types import utcnow
 from nexum.services import people, scheduling
+from nexum.services.calendar import to_utc
 from nexum.services.events import commit_and_dispatch
 
 router = APIRouter(tags=["schedule"])
 
 
 def _window(start: datetime | None, end: datetime | None) -> tuple[datetime, datetime]:
-    begin = as_utc(start) if start else utcnow()
-    finish = as_utc(end) if end else begin + timedelta(days=7)
+    begin = to_utc(start) if start else utcnow()
+    finish = to_utc(end) if end else begin + timedelta(days=7)
     if finish <= begin:
         raise ValidationError("end must be after start")
     return begin, finish
@@ -59,8 +60,8 @@ def create_shift(payload: ShiftIn, db: DbSession, user: ManagerUser) -> ShiftOut
     shift = scheduling.create_shift(
         db,
         department=department,
-        starts_at=as_utc(payload.starts_at),
-        ends_at=as_utc(payload.ends_at),
+        starts_at=to_utc(payload.starts_at),
+        ends_at=to_utc(payload.ends_at),
         employee=employee,
         role_label=payload.role_label,
         status=payload.status,

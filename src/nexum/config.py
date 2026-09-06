@@ -30,7 +30,9 @@ class Settings(BaseSettings):
     automation_tick_seconds: int = 30
     automation_webhooks_enabled: bool = False
 
-    # Payroll defaults (can be overridden per employee/pay period later)
+    # Company defaults used the first time the settings row is created
+    company_name: str = "My company"
+    timezone: str = "UTC"
     default_currency: str = "SEK"
     weekly_overtime_threshold_hours: float = 40.0
     overtime_multiplier: float = 1.5

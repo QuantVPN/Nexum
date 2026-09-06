@@ -8,7 +8,7 @@ Supported ``trigger_config`` shapes::
     {"kind": "weekly", "weekday": 0, "at": "06:00"}      # 0 = Monday
     {"kind": "monthly", "day": 1, "at": "06:00"}         # day clamped to month length
 
-All times are UTC.
+Wall-clock rules are evaluated in the company time zone (``nexum.services.calendar``).
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from datetime import datetime, time, timedelta
 from typing import Any
 
 from nexum.errors import ValidationError
+from nexum.services.calendar import timezone_name, to_local
 
 KINDS: tuple[str, ...] = ("interval", "hourly", "daily", "weekly", "monthly")
 
@@ -61,6 +62,7 @@ def next_run(config: dict[str, Any], after: datetime) -> datetime:
     kind = config.get("kind")
     if kind == "interval":
         return after + timedelta(minutes=float(config.get("minutes", 60)))
+    after = to_local(after)
     if kind == "hourly":
         minute = int(config.get("minute", 0))
         candidate = after.replace(minute=minute, second=0, microsecond=0)
@@ -107,12 +109,16 @@ def describe(config: dict[str, Any]) -> str:
     if kind == "hourly":
         return f"hourly at :{int(config.get('minute', 0)):02d}"
     if kind == "daily":
-        return f"daily at {config.get('at', '00:00')} UTC"
+        return f"daily at {config.get('at', '00:00')} {timezone_name()}"
     if kind == "weekly":
         names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         return (
-            f"weekly on {names[int(config.get('weekday', 0))]} at {config.get('at', '00:00')} UTC"
+            f"weekly on {names[int(config.get('weekday', 0))]} "
+            f"at {config.get('at', '00:00')} {timezone_name()}"
         )
     if kind == "monthly":
-        return f"monthly on day {config.get('day', 1)} at {config.get('at', '00:00')} UTC"
+        return (
+            f"monthly on day {config.get('day', 1)} at {config.get('at', '00:00')} "
+            f"{timezone_name()}"
+        )
     return str(config)

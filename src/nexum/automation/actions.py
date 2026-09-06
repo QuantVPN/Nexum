@@ -30,7 +30,8 @@ from nexum.models import (
     TimeOffStatus,
 )
 from nexum.services import notifications, payroll, people, scheduling, time_tracking
-from nexum.services.calendar import month_bounds, week_start, week_window
+from nexum.services.calendar import local_date, week_start, week_window
+from nexum.services.company import payroll_rules
 
 ActionFn = Callable[..., ActionResult]
 
@@ -199,7 +200,7 @@ def webhook(ctx: RunContext, **params: Any) -> ActionResult:
 )
 def generate_next_week_schedule(ctx: RunContext, **params: Any) -> ActionResult:
     weeks_ahead = int(params.get("weeks_ahead", 1))
-    monday = week_start(ctx.now.date()) + timedelta(days=7 * weeks_ahead)
+    monday = week_start(local_date(ctx.now)) + timedelta(days=7 * weeks_ahead)
     created = scheduling.generate_week_from_templates(
         ctx.session, monday, department_id=params.get("department_id")
     )
@@ -222,7 +223,7 @@ def generate_next_week_schedule(ctx: RunContext, **params: Any) -> ActionResult:
 )
 def auto_assign_open_shifts(ctx: RunContext, **params: Any) -> ActionResult:
     if params.get("weeks_ahead") is not None:
-        monday = week_start(ctx.now.date()) + timedelta(days=7 * int(params["weeks_ahead"]))
+        monday = week_start(local_date(ctx.now)) + timedelta(days=7 * int(params["weeks_ahead"]))
         start, end = week_window(monday)
     else:
         start = ctx.now + timedelta(days=int(params.get("start_days", 0)))
@@ -314,10 +315,9 @@ def remind_upcoming_shifts(ctx: RunContext, **params: Any) -> ActionResult:
     {"threshold_hours": "float (default: settings threshold)"},
 )
 def flag_overtime(ctx: RunContext, **params: Any) -> ActionResult:
-    threshold = Decimal(
-        str(params.get("threshold_hours", ctx.settings.weekly_overtime_threshold_hours))
-    )
-    ws, we = week_window(week_start(ctx.now.date()))
+    default_threshold = payroll_rules(ctx.session).weekly_overtime_threshold_hours
+    threshold = Decimal(str(params.get("threshold_hours", default_threshold)))
+    ws, we = week_window(week_start(local_date(ctx.now)))
     totals = scheduling.week_hours_by_employee(ctx.session, ws, we)
     flagged: list[str] = []
     for employee_id, total in totals.items():
@@ -400,7 +400,7 @@ def nudge_pending_approvals(ctx: RunContext, **params: Any) -> ActionResult:
     total = len(stale_requests) + len(stale_entries)
     if not total:
         return ActionResult("nothing waiting for approval")
-    source = f"approvals:{ctx.now.date().isoformat()}:{ctx.rule.id}"
+    source = f"approvals:{local_date(ctx.now).isoformat()}:{ctx.rule.id}"
     if _already_notified(ctx, source):
         return ActionResult(f"{total} waiting; already nudged today", count=total)
     notifications.notify_role(
@@ -424,10 +424,10 @@ def nudge_pending_approvals(ctx: RunContext, **params: Any) -> ActionResult:
     {},
 )
 def compute_current_payroll(ctx: RunContext, **params: Any) -> ActionResult:
-    period = payroll.current_period(ctx.session, ctx.now.date())
+    period = payroll.current_period(ctx.session, local_date(ctx.now))
     if period.status != PayPeriodStatus.OPEN:
         return ActionResult(f"period {period.label} is {period.status.value}; nothing to do")
-    slips = payroll.compute_payslips(ctx.session, period, settings=ctx.settings)
+    slips = payroll.compute_payslips(ctx.session, period)
     totals = payroll.period_totals(period)
     return ActionResult(
         f"refreshed {len(slips)} payslip preview(s); "
@@ -439,13 +439,11 @@ def compute_current_payroll(ctx: RunContext, **params: Any) -> ActionResult:
 
 @action(
     "close_previous_pay_period",
-    "Close last month's pay period: compute final payslips and lock it.",
+    "Close the previous pay period (last month or last bi-weekly period): final payslips, locked.",
     {},
 )
 def close_previous_pay_period(ctx: RunContext, **params: Any) -> ActionResult:
-    first_this_month, _ = month_bounds(ctx.now.date())
-    prev_first, prev_last = month_bounds(first_this_month - timedelta(days=1))
-    period = payroll.get_or_create_period(ctx.session, prev_first, prev_last)
+    period = payroll.previous_period(ctx.session, local_date(ctx.now))
     if period.status != PayPeriodStatus.OPEN:
         return ActionResult(f"period {period.label} already {period.status.value}")
     slips = payroll.close_period(ctx.session, period)

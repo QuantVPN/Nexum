@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Company settings</h1><span class="muted">Changes apply immediately to schedules, payroll previews and automations.</span></div>
+<form method="post" action="/settings" class="columns wide-left">{{ csrf_input }}
+  <div class="stack">
+    <section class="card stack">
+      <h2>Company</h2>
+      <div class="row">
+        <label>Name <input name="name" value="{{ c.name }}" required></label>
+        <label>Time zone
+          <select name="timezone">
+            {% for tz in timezones %}<option value="{{ tz }}" {{ 'selected' if tz == c.timezone }}>{{ tz }}</option>{% endfor %}
+            {% if c.timezone not in timezones %}<option value="{{ c.timezone }}" selected>{{ c.timezone }}</option>{% endif %}
+          </select>
+        </label>
+        <label>Currency <input name="currency" value="{{ c.currency }}" maxlength="3" required></label>
+        <label>Default weekly hours <input name="default_weekly_hours" value="{{ c.default_weekly_hours }}"></label>
+      </div>
+    </section>
+    <section class="card stack">
+      <h2>Payroll rules</h2>
+      <div class="row">
+        <label>Overtime after (h/week) <input name="weekly_overtime_threshold_hours" value="{{ c.weekly_overtime_threshold_hours }}"></label>
+        <label>Overtime multiplier <input name="overtime_multiplier" value="{{ c.overtime_multiplier }}"></label>
+        <label>Pay period <select name="pay_period_type"><option value="monthly" {{ 'selected' if c.pay_period_type.value == 'monthly' }}>monthly</option><option value="biweekly" {{ 'selected' if c.pay_period_type.value == 'biweekly' }}>bi-weekly</option></select></label>
+        <label>Bi-weekly anchor (a period start) <input type="date" name="biweekly_anchor" value="{{ c.biweekly_anchor|d if c.biweekly_anchor else '' }}"></label>
+      </div>
+      <div class="row">
+        <label>Round worked time to (minutes, 0 = off) <input type="number" name="rounding_minutes" value="{{ c.rounding_minutes }}" min="0"></label>
+        <label>Automatic unpaid break (minutes, 0 = off) <input type="number" name="auto_break_minutes" value="{{ c.auto_break_minutes }}" min="0"></label>
+        <label>…after (hours worked) <input name="auto_break_after_hours" value="{{ c.auto_break_after_hours }}"></label>
+        <label>Vacation days per year <input name="vacation_days_per_year" value="{{ c.vacation_days_per_year }}"></label>
+      </div>
+      <label>Premium windows (JSON list; extra pay on top of base, e.g. evenings and weekends)
+        <textarea name="premium_rules" rows="5">{{ c.premium_rules|pretty_json }}</textarea>
+        <small class="muted">Each entry: {"label": "Evening", "weekdays": [0,1,2,3,4], "start": "18:00", "end": "22:00", "multiplier": 1.2}. End before start means the window runs past midnight.</small>
+      </label>
+      <label>Public holidays (JSON list)
+        <textarea name="holidays" rows="4">{{ c.holidays|pretty_json }}</textarea>
+        <small class="muted">Each entry: {"date": "2026-12-25", "label": "Christmas Day", "multiplier": 2.0}. The highest applicable multiplier wins.</small>
+      </label>
+    </section>
+  </div>
+  <div class="stack">
+    <section class="card stack">
+      <h2>E-mail delivery</h2>
+      <label class="check"><input type="checkbox" name="email_notifications_enabled" value="1" {{ 'checked' if c.email_notifications_enabled }}> Send notifications by e-mail (users can opt out)</label>
+      <label>SMTP host <input name="smtp_host" value="{{ c.smtp_host or '' }}" placeholder="smtp.example.com"></label>
+      <div class="row">
+        <label>Port <input type="number" name="smtp_port" value="{{ c.smtp_port }}"></label>
+        <label class="check"><input type="checkbox" name="smtp_use_tls" value="1" {{ 'checked' if c.smtp_use_tls }}> STARTTLS</label>
+      </div>
+      <label>Username <input name="smtp_username" value="{{ c.smtp_username or '' }}"></label>
+      <label>Password <input type="password" name="smtp_password" value="" placeholder="{{ '(unchanged)' if c.smtp_password else '' }}"></label>
+      <label>From address <input name="smtp_from" value="{{ c.smtp_from or '' }}" placeholder="nexum@example.com"></label>
+      <p class="muted">Status: {{ 'configured' if c.email_configured else 'not configured' }}</p>
+    </section>
+    <button class="btn btn-primary">Save settings</button>
+  </div>
+</form>
+{% if c.email_configured %}
+<form method="post" action="/settings/test-email" class="card row">{{ csrf_input }}
+  <label>Send a test e-mail to <input type="email" name="to" value="{{ current_user.email }}"></label>
+  <button class="btn">Send test</button>
+</form>
+{% endif %}
+{% endblock %}

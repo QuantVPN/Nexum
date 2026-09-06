@@ -4,10 +4,12 @@ a demo company and an authenticated HTTP client."""
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
+from typing import Any
 
 os.environ.setdefault("NEXUM_ENVIRONMENT", "test")
 os.environ.setdefault("NEXUM_DATABASE_URL", "sqlite:///:memory:")
@@ -23,7 +25,9 @@ from nexum.automation.recipes import install_recipes
 from nexum.config import reset_settings_cache
 from nexum.db import configure_engine, init_db, session_factory
 from nexum.models import Department, Employee, EmploymentType, PayType, Role, User
-from nexum.services import people, scheduling
+from nexum.services import company as company_service
+from nexum.services import mailer, people, scheduling
+from nexum.services.calendar import set_timezone
 from nexum.services.events import clear_dispatchers, commit_and_dispatch
 
 MONDAY = date(2026, 9, 7)  # a Monday
@@ -50,9 +54,13 @@ def fresh_db() -> Iterator[None]:
     init_db(drop=not TEST_DATABASE_URL.startswith("sqlite"))
     clear_dispatchers()
     set_engine(None)
+    set_timezone("UTC")
+    mailer.set_transport(None)
     yield
     clear_dispatchers()
     set_engine(None)
+    set_timezone("UTC")
+    mailer.set_transport(None)
 
 
 @pytest.fixture
@@ -165,3 +173,56 @@ def client() -> Iterator[TestClient]:
 def login(client: TestClient, email: str, password: str = PASSWORD) -> None:
     response = client.post("/api/v1/auth/login", json={"email": email, "password": password})
     assert response.status_code == 200, response.text
+
+
+CSRF_RE = re.compile(r'name="csrf_token" value="([^"]+)"')
+_csrf_cache: dict[int, str] = {}
+
+
+def csrf_token(client: TestClient, refresh: bool = False) -> str:
+    """The session's CSRF token, read once from a rendered form and cached per client
+    (re-reading a page would consume flash messages the test may want to assert on)."""
+    if not refresh and id(client) in _csrf_cache:
+        return _csrf_cache[id(client)]
+    for url in ("/notifications", "/login"):
+        response = client.get(url)
+        if response.status_code == 200:
+            match = CSRF_RE.search(response.text)
+            if match:
+                _csrf_cache[id(client)] = match.group(1)
+                return match.group(1)
+    raise AssertionError("no CSRF token found on /notifications or /login")
+
+
+def post(client: TestClient, url: str, data: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+    """POST a web form with the CSRF token filled in (the way a browser would)."""
+    payload = dict(data or {})
+    payload["csrf_token"] = csrf_token(client)
+    response = client.post(url, data=payload, **kwargs)
+    if response.status_code == 403 and "expired" in response.text:
+        payload["csrf_token"] = csrf_token(client, refresh=True)
+        response = client.post(url, data=payload, **kwargs)
+    if url in ("/login", "/logout"):
+        _csrf_cache.pop(id(client), None)  # the session was rotated
+    return response
+
+
+@pytest.fixture
+def stockholm(session: Session) -> None:
+    company_service.update_company(session, timezone="Europe/Stockholm")
+    session.commit()
+
+
+@pytest.fixture
+def outbox(session: Session) -> list[mailer.Message]:
+    """Configure e-mail and capture everything that would be sent."""
+    sent: list[mailer.Message] = []
+    mailer.set_transport(lambda _settings, message: sent.append(message))
+    company_service.update_company(
+        session,
+        email_notifications_enabled=True,
+        smtp_host="smtp.test",
+        smtp_from="nexum@test",
+    )
+    session.commit()
+    return sent

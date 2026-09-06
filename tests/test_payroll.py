@@ -4,11 +4,11 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.orm import Session
 
-from nexum.config import get_settings
 from nexum.errors import ConflictError
 from nexum.models import PayPeriodStatus, ShiftStatus, TimeOffKind
 from nexum.services import payroll, people, scheduling, time_tracking
 from nexum.services.calendar import week_window
+from nexum.services.company import PayrollRules
 from tests.conftest import MONDAY, Company
 
 SEPT = (date(2026, 9, 1), date(2026, 9, 30))
@@ -119,13 +119,13 @@ def test_employees_outside_period_are_skipped(session: Session, company: Company
     assert company.ida.id not in {e.id for e in payroll.employees_in_period(session, period)}
 
 
-def test_settings_drive_threshold_and_multiplier(session: Session, company: Company) -> None:
-    settings = get_settings().model_copy(
-        update={"weekly_overtime_threshold_hours": 30.0, "overtime_multiplier": 2.0}
+def test_rules_drive_threshold_and_multiplier(session: Session, company: Company) -> None:
+    rules = PayrollRules(
+        weekly_overtime_threshold_hours=Decimal("30"), overtime_multiplier=Decimal("2")
     )
     publish_week(session, company, MONDAY, company.eva, 8, 5)  # 40h
     period = payroll.get_or_create_period(session, *SEPT)
-    calc = payroll.calculate_payslip(session, company.eva, period, settings)
+    calc = payroll.calculate_payslip(session, company.eva, period, rules)
     assert calc.overtime_hours == Decimal("10.00")
     assert calc.overtime_amount == Decimal("4200.00")  # 10 * 210 * 2
 

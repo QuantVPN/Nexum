@@ -2,6 +2,7 @@
 
 from nexum.models.audit import AuditLog
 from nexum.models.automation import AutomationRule, AutomationRun, RunStatus, TriggerType
+from nexum.models.company import CompanySettings, PayPeriodType
 from nexum.models.identity import ROLE_RANK, Role, User
 from nexum.models.notifications import Notification, NotificationLevel
 from nexum.models.org import Department
@@ -22,6 +23,7 @@ __all__ = [
     "AuditLog",
     "AutomationRule",
     "AutomationRun",
+    "CompanySettings",
     "Department",
     "Employee",
     "EmploymentType",
@@ -29,6 +31,7 @@ __all__ = [
     "NotificationLevel",
     "PayPeriod",
     "PayPeriodStatus",
+    "PayPeriodType",
     "PayType",
     "Payslip",
     "Role",

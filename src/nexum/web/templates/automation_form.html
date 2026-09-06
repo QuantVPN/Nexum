@@ -3,7 +3,7 @@
 <div class="page-head"><h1>New automation</h1><a class="btn btn-sm" href="/automations">Cancel</a></div>
 <div class="columns wide-left">
   <section class="card">
-    <form method="post" action="/automations/new" class="stack">
+    <form method="post" action="/automations/new" class="stack">{{ csrf_input }}
       <label>Name <input name="name" value="{{ form.get('name') or '' }}" required></label>
       <label>Description <input name="description" value="{{ form.get('description') or '' }}"></label>
       <div class="row">

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from nexum.config import Settings
 from nexum.models import AutomationRule, Department, Employee, PayPeriod, Shift, TimeOffRequest
+from nexum.services.calendar import to_local
 from nexum.services.events import DomainEvent
 
 
@@ -41,10 +42,10 @@ class RunContext:
         mapping: dict[str, Any] = {
             "now": {
                 "iso": self.now.isoformat(),
-                "date": self.now.date().isoformat(),
-                "hour": self.now.hour,
-                "minute": self.now.minute,
-                "weekday": self.now.weekday(),
+                "date": to_local(self.now).date().isoformat(),
+                "hour": to_local(self.now).hour,
+                "minute": to_local(self.now).minute,
+                "weekday": to_local(self.now).weekday(),
             },
             "rule": {"key": self.rule.key, "name": self.rule.name, "id": self.rule.id},
             "event": dict(self.event.payload) if self.event else {},
@@ -76,8 +77,8 @@ def enrich(session: Session, payload: dict[str, Any]) -> dict[str, Any]:
         if shift is not None:
             extra["shift"] = {
                 "id": shift.id,
-                "starts_at": shift.starts_at.strftime("%a %Y-%m-%d %H:%M"),
-                "ends_at": shift.ends_at.strftime("%H:%M"),
+                "starts_at": to_local(shift.starts_at).strftime("%a %Y-%m-%d %H:%M"),
+                "ends_at": to_local(shift.ends_at).strftime("%H:%M"),
                 "department": shift.department.name if shift.department else "",
                 "role_label": shift.role_label or "",
                 "hours": round(shift.duration_hours, 1),

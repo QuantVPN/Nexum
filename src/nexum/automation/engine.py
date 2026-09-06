@@ -51,6 +51,10 @@ class AutomationEngine:
     def unsubscribe(self) -> None:
         event_bus.unregister_dispatcher(self.handle_event)
 
+    @property
+    def is_running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
     def start_background(self) -> None:
         if self._thread is not None:
             return

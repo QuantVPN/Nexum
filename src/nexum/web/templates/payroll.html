@@ -19,7 +19,7 @@
     </ol>
     {% if current_user.has_role(Role.ADMIN) %}
     <h3>Create period</h3>
-    <form method="post" action="/payroll/periods" class="stack">
+    <form method="post" action="/payroll/periods" class="stack">{{ csrf_input }}
       <label>Start <input type="date" name="start_date" required></label>
       <label>End <input type="date" name="end_date" required></label>
       <button class="btn">Create</button>

@@ -2,11 +2,11 @@ import re
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import PASSWORD, Company
+from tests.conftest import PASSWORD, Company, post
 
 
 def web_login(client: TestClient, email: str) -> None:
-    r = client.post("/login", data={"email": email, "password": PASSWORD})
+    r = post(client, "/login", {"email": email, "password": PASSWORD})
     assert r.status_code == 303, r.text
 
 
@@ -24,17 +24,19 @@ def test_anonymous_redirects_to_login(client: TestClient) -> None:
 
 
 def test_login_logout_and_flash(client: TestClient, company: Company) -> None:
-    r = client.post("/login", data={"email": "admin@nexum.test", "password": "nope"})
+    r = post(client, "/login", data={"email": "admin@nexum.test", "password": "nope"})
     assert r.headers["location"] == "/login"
     assert "Invalid email or password" in page(client, "/login")
     web_login(client, "admin@nexum.test")
     assert client.get("/").headers["location"] == "/dashboard"
     assert client.get("/login").headers["location"] == "/dashboard"
-    r = client.post(
-        "/login", data={"email": "admin@nexum.test", "password": PASSWORD, "next": "//evil.example"}
+    r = post(
+        client,
+        "/login",
+        data={"email": "admin@nexum.test", "password": PASSWORD, "next": "//evil.example"},
     )
     assert r.headers["location"] == "/dashboard"  # open redirect blocked
-    assert client.post("/logout").headers["location"] == "/login"
+    assert post(client, "/logout").headers["location"] == "/login"
     assert client.get("/dashboard").status_code == 303
 
 
@@ -66,14 +68,14 @@ def test_admin_schedule_and_payroll_flow(
 ) -> None:
     web_login(client, "admin@nexum.test")
     assert (
-        client.post(
-            "/schedule/generate", data={"week": "2026-09-07", "department_id": ""}
+        post(
+            client, "/schedule/generate", data={"week": "2026-09-07", "department_id": ""}
         ).status_code
         == 303
     )
     assert (
-        client.post(
-            "/schedule/auto-assign", data={"week": "2026-09-07", "department_id": ""}
+        post(
+            client, "/schedule/auto-assign", data={"week": "2026-09-07", "department_id": ""}
         ).status_code
         == 303
     )
@@ -81,7 +83,8 @@ def test_admin_schedule_and_payroll_flow(
     assert html.count('class="chip chip-draft"') == 10
     assert "Auto-assigned 10 shift(s)" in html
     assert (
-        client.post(
+        post(
+            client,
             "/shifts",
             data={
                 "department_id": str(company.department.id),
@@ -96,7 +99,8 @@ def test_admin_schedule_and_payroll_flow(
     html = page(client, "/schedule?week=2026-09-07")
     assert 'class="chip chip-open"' in html and "Lead" in html
     assert (
-        client.post(
+        post(
+            client,
             "/shifts",
             data={
                 "department_id": str(company.department.id),
@@ -108,32 +112,32 @@ def test_admin_schedule_and_payroll_flow(
     )
     assert "must end after it starts" in page(client, "/schedule?week=2026-09-07")
     assert (
-        client.post(
-            "/schedule/publish", data={"week": "2026-09-07", "department_id": ""}
+        post(
+            client, "/schedule/publish", data={"week": "2026-09-07", "department_id": ""}
         ).status_code
         == 303
     )
     assert "Published 11 shift(s)" in page(client, "/schedule?week=2026-09-07")
     assert (
-        client.post(
-            "/payroll/periods", data={"start_date": "2026-09-01", "end_date": "2026-09-30"}
+        post(
+            client, "/payroll/periods", data={"start_date": "2026-09-01", "end_date": "2026-09-30"}
         ).status_code
         == 303
     )
     html = page(client, "/payroll")
     pid = re.search(r'href="/payroll/(\d+)"', html).group(1)
-    assert client.post(f"/payroll/{pid}/compute").status_code == 303
+    assert post(client, f"/payroll/{pid}/compute").status_code == 303
     html = page(client, f"/payroll/{pid}")
     assert "Computed 3 payslip(s)" in html and "Eva Lund" in html
-    assert client.post(f"/payroll/{pid}/close").status_code == 303
-    assert client.post(f"/payroll/{pid}/pay").status_code == 303
-    assert client.post(f"/payroll/{pid}/bogus").status_code == 303
+    assert post(client, f"/payroll/{pid}/close").status_code == 303
+    assert post(client, f"/payroll/{pid}/pay").status_code == 303
+    assert post(client, f"/payroll/{pid}/bogus").status_code == 303
     assert "Unknown payroll action" in page(client, f"/payroll/{pid}")
 
 
 def test_admin_people_and_templates_forms(client: TestClient, company: Company) -> None:
     web_login(client, "admin@nexum.test")
-    assert client.post("/departments", data={"name": "Support"}).status_code == 303
+    assert post(client, "/departments", data={"name": "Support"}).status_code == 303
     html = page(client, "/employees")
     assert "Support" in html and "created" in html
     data = {
@@ -149,18 +153,21 @@ def test_admin_people_and_templates_forms(client: TestClient, company: Company) 
         "employment_type": "hourly",
         "weekly_hours": "32",
     }
-    assert client.post("/employees", data=data).status_code == 303
+    assert post(client, "/employees", data=data).status_code == 303
     assert "New Hire added" in page(client, "/employees")
     assert (
-        client.post("/employees", data=dict(data, email="bad", start_date="not-a-date")).status_code
+        post(
+            client, "/employees", data=dict(data, email="bad", start_date="not-a-date")
+        ).status_code
         == 303
     )
     assert "Start date" in page(client, "/employees")
     assert (
-        client.post("/employees", data={"first_name": "only"}).status_code == 422
+        post(client, "/employees", data={"first_name": "only"}).status_code == 422
     )  # missing fields -> HTML error page
     assert (
-        client.post(
+        post(
+            client,
             "/templates",
             data={
                 "department_id": "1",
@@ -176,11 +183,11 @@ def test_admin_people_and_templates_forms(client: TestClient, company: Company) 
     html = page(client, "/templates")
     assert "Night" in html and "Added template for 2 weekday(s)" in html
     tid = re.findall(r"/templates/(\d+)/delete", html)[-1]
-    assert client.post(f"/templates/{tid}/delete").status_code == 303
-    assert client.post("/templates/999/delete").status_code == 303
+    assert post(client, f"/templates/{tid}/delete").status_code == 303
+    assert post(client, "/templates/999/delete").status_code == 303
     assert "Template not found" in page(client, "/templates")
     emp_id = re.findall(r'href="/employees/(\d+)"', page(client, "/employees"))[-1]
-    assert client.post(f"/employees/{emp_id}/deactivate").status_code == 303
+    assert post(client, f"/employees/{emp_id}/deactivate").status_code == 303
 
 
 def test_automation_pages_and_forms(client: TestClient, company: Company, recipes: None) -> None:
@@ -188,7 +195,8 @@ def test_automation_pages_and_forms(client: TestClient, company: Company, recipe
     html = page(client, "/automations")
     assert "Fill open shifts every morning" in html and "built-in" in html
     page(client, "/automations/new")
-    r = client.post(
+    r = post(
+        client,
         "/automations/new",
         data={
             "name": "Broken",
@@ -198,7 +206,8 @@ def test_automation_pages_and_forms(client: TestClient, company: Company, recipe
         },
     )
     assert r.status_code == 422 and "invalid JSON" in r.text and 'value="Broken"' in r.text
-    r = client.post(
+    r = post(
+        client,
         "/automations/new",
         data={
             "name": "Friday note",
@@ -213,22 +222,23 @@ def test_automation_pages_and_forms(client: TestClient, company: Company, recipe
     url = r.headers["location"]
     html = page(client, url)
     assert "Friday note" in html and "weekly on Fri at 15:00 UTC" in html
-    assert client.post(f"{url}/run").status_code == 303
+    assert post(client, f"{url}/run").status_code == 303
     html = page(client, url)
     assert "Run finished: success" in html and '<details class="run"' in html
-    assert client.post(f"{url}/toggle").status_code == 303
+    assert post(client, f"{url}/toggle").status_code == 303
     assert "disabled" in page(client, "/automations")
-    assert client.post(f"{url}/delete").status_code == 303
+    assert post(client, f"{url}/delete").status_code == 303
     assert page(client, url, 404)
     assert page(client, "/automations/999", 404)
     web_login(client, "mgr@nexum.test")
-    assert client.post(f"{url}/toggle").status_code == 403
+    assert post(client, f"{url}/toggle").status_code == 403
 
 
 def test_approvals_page_actions(client: TestClient, company: Company) -> None:
     web_login(client, "eva@nexum.test")
     assert (
-        client.post(
+        post(
+            client,
             "/me/requests",
             data={
                 "kind": "vacation",
@@ -240,7 +250,8 @@ def test_approvals_page_actions(client: TestClient, company: Company) -> None:
         == 303
     )
     assert (
-        client.post(
+        post(
+            client,
             "/me/time/entries",
             data={
                 "clock_in": "2026-09-07T08:00",
@@ -258,15 +269,15 @@ def test_approvals_page_actions(client: TestClient, company: Company) -> None:
     req_id = re.search(r"/time-off/(\d+)/decide", html).group(1)
     entry_id = re.search(r"/time/entries/(\d+)/decide", html).group(1)
     assert (
-        client.post(f"/time-off/{req_id}/decide", data={"decision": "approve"}).status_code == 303
+        post(client, f"/time-off/{req_id}/decide", data={"decision": "approve"}).status_code == 303
     )
     assert (
-        client.post(f"/time/entries/{entry_id}/decide", data={"decision": "reject"}).status_code
+        post(client, f"/time/entries/{entry_id}/decide", data={"decision": "reject"}).status_code
         == 303
     )
     html = page(client, "/approvals")
     assert "Request approved" in html and "Time entry rejected" in html
-    assert client.post("/time-off/999/decide", data={"decision": "approve"}).status_code == 303
+    assert post(client, "/time-off/999/decide", data={"decision": "approve"}).status_code == 303
     assert "Request not found" in page(client, "/approvals")
 
 
@@ -277,20 +288,21 @@ def test_employee_self_service(client: TestClient, recipes: None, company: Compa
     assert page(client, "/employees", 403)
     html = page(client, "/me")
     assert "Hi Eva" in html and "Clock in" in html
-    assert client.post("/me/clock-in").status_code == 303
+    assert post(client, "/me/clock-in").status_code == 303
     html = page(client, "/me")
     assert "Clocked in" in html and "Clock out" in html
-    assert client.post("/me/clock-in").status_code == 303
+    assert post(client, "/me/clock-in").status_code == 303
     assert "already clocked in" in page(client, "/me")
-    assert client.post("/me/clock-out", data={"break_minutes": "0"}).status_code == 303
+    assert post(client, "/me/clock-out", data={"break_minutes": "0"}).status_code == 303
     assert "submitted for approval" in page(client, "/me")
-    assert client.post("/me/clock-out", data={"break_minutes": "0"}).status_code == 303
+    assert post(client, "/me/clock-out", data={"break_minutes": "0"}).status_code == 303
     assert "not clocked in" in page(client, "/me")
     page(client, "/me/pay")
     page(client, "/me/time")
     page(client, "/me/requests")
     assert (
-        client.post(
+        post(
+            client,
             "/me/requests",
             data={"kind": "sick", "start_date": "2026-10-02", "end_date": "2026-10-01"},
         ).status_code
@@ -299,6 +311,6 @@ def test_employee_self_service(client: TestClient, recipes: None, company: Compa
     assert "on or after the start date" in page(client, "/me/requests")
     html = page(client, "/notifications")
     assert "Welcome to the team, Eva!" in html
-    assert client.post("/notifications/read-all").status_code == 303
+    assert post(client, "/notifications/read-all").status_code == 303
     assert 'class="unread' not in page(client, "/notifications")
     assert page(client, "/static/style.css").startswith(":root")

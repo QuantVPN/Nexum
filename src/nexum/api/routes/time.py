@@ -8,8 +8,9 @@ from nexum.api.deps import CurrentEmployee, CurrentUser, DbSession, ManagerUser
 from nexum.api.schemas import ClockIn, ClockOut, DecisionIn, TimeEntryIn, TimeEntryOut
 from nexum.errors import ConflictError, PermissionDeniedError
 from nexum.models import Role, TimeEntryStatus
-from nexum.models.types import as_utc, utcnow
+from nexum.models.types import utcnow
 from nexum.services import people, scheduling, time_tracking
+from nexum.services.calendar import to_utc
 from nexum.services.events import commit_and_dispatch
 
 router = APIRouter(prefix="/time", tags=["time"])
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/time", tags=["time"])
 def clock_in(payload: ClockIn, db: DbSession, employee: CurrentEmployee) -> TimeEntryOut:
     shift = scheduling.get_shift(db, payload.shift_id) if payload.shift_id else None
     entry = time_tracking.clock_in(
-        db, employee, as_utc(payload.at) if payload.at else utcnow(), shift=shift
+        db, employee, to_utc(payload.at) if payload.at else utcnow(), shift=shift
     )
     commit_and_dispatch(db)
     return TimeEntryOut.model_validate(entry)
@@ -33,7 +34,7 @@ def clock_out(payload: ClockOut, db: DbSession, employee: CurrentEmployee) -> Ti
     time_tracking.clock_out(
         db,
         entry,
-        as_utc(payload.at) if payload.at else utcnow(),
+        to_utc(payload.at) if payload.at else utcnow(),
         break_minutes=payload.break_minutes,
     )
     commit_and_dispatch(db)
@@ -49,8 +50,8 @@ def list_entries(
     employee_id: int | None = None,
     status: TimeEntryStatus | None = None,
 ) -> list[TimeEntryOut]:
-    finish = as_utc(end) if end else utcnow() + timedelta(days=1)
-    begin = as_utc(start) if start else finish - timedelta(days=31)
+    finish = to_utc(end) if end else utcnow() + timedelta(days=1)
+    begin = to_utc(start) if start else finish - timedelta(days=31)
     if not user.has_role(Role.MANAGER):
         employee_id = user.employee.id if user.employee else -1
     rows = time_tracking.entries_in_window(
@@ -77,8 +78,8 @@ def create_entry(payload: TimeEntryIn, db: DbSession, user: CurrentUser) -> Time
     entry = time_tracking.record_entry(
         db,
         employee,
-        as_utc(payload.clock_in),
-        as_utc(payload.clock_out),
+        to_utc(payload.clock_in),
+        to_utc(payload.clock_out),
         break_minutes=payload.break_minutes,
         shift=shift,
         note=payload.note,

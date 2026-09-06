@@ -3,7 +3,7 @@
 <div class="login-box">
   <h1>Sign in to {{ settings.app_name }}</h1>
   <p class="muted">Company overview, schedules, pay and automation in one place.</p>
-  <form method="post" action="/login" class="stack">
+  <form method="post" action="/login" class="stack">{{ csrf_input }}
     <input type="hidden" name="next" value="{{ next }}">
     <label>Email <input type="email" name="email" required autofocus></label>
     <label>Password <input type="password" name="password" required></label>

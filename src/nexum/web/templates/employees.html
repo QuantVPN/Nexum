@@ -19,7 +19,7 @@
           <td>{% if e.pay_type.value == 'hourly' %}{{ e.hourly_rate|money(e.currency) }}/h{% else %}{{ e.monthly_salary|money(e.currency) }}/month{% endif %}</td>
           <td>{{ e.weekly_hours }}</td>
           <td>{% if e.user %}<span class="badge">{{ e.user.role.value }}</span>{% else %}<span class="muted">none</span>{% endif %}</td>
-          <td>{% if e.is_active %}<form method="post" action="/employees/{{ e.id }}/deactivate" onsubmit="return confirm('Deactivate {{ e.full_name }}?')"><button class="btn btn-sm btn-ghost">Deactivate</button></form>{% else %}<span class="badge badge-muted">inactive</span>{% endif %}</td>
+          <td>{% if e.is_active %}<form method="post" action="/employees/{{ e.id }}/deactivate" onsubmit="return confirm('Deactivate {{ e.full_name }}?')">{{ csrf_input }}<button class="btn btn-sm btn-ghost">Deactivate</button></form>{% else %}<span class="badge badge-muted">inactive</span>{% endif %}</td>
         </tr>
       {% else %}
         <tr><td colspan="7" class="muted">No employees yet. Add the first one on the right.</td></tr>
@@ -31,7 +31,7 @@
   <aside class="stack">
     <section class="card">
       <h2>Add employee</h2>
-      <form method="post" action="/employees" class="stack">
+      <form method="post" action="/employees" class="stack">{{ csrf_input }}
         <div class="row"><label>First name <input name="first_name" required></label><label>Last name <input name="last_name" required></label></div>
         <label>Email <input type="email" name="email" required></label>
         <div class="row">
@@ -60,7 +60,7 @@
     <section class="card">
       <h2>Departments</h2>
       <ul class="list compact">{% for d in departments %}<li>{{ d.name }}{% if d.cost_center %} <span class="muted">({{ d.cost_center }})</span>{% endif %}</li>{% else %}<li class="muted">None yet</li>{% endfor %}</ul>
-      <form method="post" action="/departments" class="row">
+      <form method="post" action="/departments" class="row">{{ csrf_input }}
         <input name="name" placeholder="Department name" required>
         <input name="cost_center" placeholder="Cost center">
         <button class="btn">Add</button>

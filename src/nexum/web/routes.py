@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 from collections.abc import Callable
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,7 +20,13 @@ from nexum.automation import get_engine
 from nexum.automation import schedule as schedule_rules
 from nexum.automation.actions import list_actions
 from nexum.automation.engine import AutomationEngine
-from nexum.errors import AuthenticationError, NexumError, NotFoundError, ValidationError
+from nexum.errors import (
+    AuthenticationError,
+    NexumError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 from nexum.models import (
     AutomationRule,
     AutomationRun,
@@ -40,19 +47,46 @@ from nexum.models import (
 from nexum.models.types import utcnow
 from nexum.services import (
     audit,
+    company,
     dashboard,
+    mailer,
     notifications,
     payroll,
     people,
     scheduling,
     time_tracking,
 )
-from nexum.services.calendar import week_start, week_window
+from nexum.services.calendar import (
+    COMMON_TIMEZONES,
+    local_date,
+    localize,
+    today,
+    week_start,
+    week_window,
+)
 from nexum.services.events import EVENT_NAMES, commit_and_dispatch
 from nexum.services.security import verify_password
-from nexum.web.templating import flash, render
+from nexum.web.templating import CSRF_KEY, flash, render
 
-web_router = APIRouter(include_in_schema=False)
+
+async def verify_csrf(request: Request) -> None:
+    """Every state-changing web request must carry the session's CSRF token."""
+    if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+        return
+    expected = request.session.get(CSRF_KEY)
+    form = await request.form()
+    supplied = form.get("csrf_token")
+    if (
+        not isinstance(expected, str)
+        or not isinstance(supplied, str)
+        or not hmac.compare_digest(supplied, expected)
+    ):
+        raise PermissionDeniedError(
+            "This form has expired or was tampered with. Reload the page and try again."
+        )
+
+
+web_router = APIRouter(include_in_schema=False, dependencies=[Depends(verify_csrf)])
 
 FormStr = Annotated[str, Form()]
 FormOptStr = Annotated[str | None, Form()]
@@ -79,12 +113,12 @@ def parse_date(value: str | None, field: str) -> date:
 
 
 def parse_datetime(value: str | None, field: str) -> datetime:
-    """Accept ``datetime-local`` input (``2026-09-07T08:00``); treated as UTC."""
+    """Accept ``datetime-local`` input (``2026-09-07T08:00``) as company local time."""
     try:
         parsed = datetime.fromisoformat((value or "").strip())
     except ValueError as exc:
         raise ValidationError(f"{field}: enter a date and time") from exc
-    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    return localize(parsed)
 
 
 def parse_time(value: str | None, field: str) -> time:
@@ -119,7 +153,7 @@ def week_from_query(request: Request) -> date:
             return week_start(date.fromisoformat(raw))
         except ValueError:
             pass
-    return week_start(utcnow().date())
+    return week_start(today())
 
 
 def int_query(request: Request, name: str) -> int | None:
@@ -341,7 +375,7 @@ def schedule_page(request: Request, db: DbSession, user: ManagerUser) -> Respons
     grid[None] = {d: [] for d in days}
     for shift in shifts:
         key = shift.employee_id if shift.employee_id in grid else None
-        grid[key][shift.starts_at.date()].append(shift)
+        grid[key][local_date(shift.starts_at)].append(shift)
     open_shifts = [s for s in shifts if s.employee_id is None]
     candidates = {s.id: scheduling.candidate_employees(db, s) for s in open_shifts}
     hours = scheduling.week_hours_by_employee(db, ws, we)
@@ -440,7 +474,7 @@ def shift_create(
     publish: FormOptStr = None,
 ) -> Response:
     start = parse_datetime(starts_at, "Start")
-    back = _schedule_url(week_start(start.date()), department_id)
+    back = _schedule_url(week_start(local_date(start)), department_id)
 
     def work() -> str:
         department = people.get_department(db, department_id)
@@ -462,7 +496,7 @@ def shift_create(
 
 def _shift_back(db: Session, shift_id: int) -> str:
     shift = scheduling.get_shift(db, shift_id)
-    return _schedule_url(week_start(shift.starts_at.date()), None)
+    return _schedule_url(week_start(local_date(shift.starts_at)), None)
 
 
 @web_router.post("/shifts/{shift_id}/assign")
@@ -844,6 +878,81 @@ def automation_delete(request: Request, db: DbSession, user: AdminUser, rule_id:
         return f"'{rule.name}' deleted"
 
     return guarded(request, db, "/automations", work)
+
+
+# --- admin: company settings ---------------------------------------------------------------------
+
+
+@web_router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, db: DbSession, user: AdminUser) -> Response:
+    row = company.get_company(db)
+    db.commit()
+    return render(
+        request,
+        "settings.html",
+        db=db,
+        user=user,
+        title="Settings",
+        c=row,
+        timezones=COMMON_TIMEZONES,
+    )
+
+
+@web_router.post("/settings")
+async def settings_save(request: Request, db: DbSession, user: AdminUser) -> Response:
+    form = await request.form()
+
+    def text(name: str) -> str | None:
+        value = form.get(name)
+        return value.strip() if isinstance(value, str) else None
+
+    def work() -> str:
+        changes: dict[str, Any] = {
+            "name": text("name") or "My company",
+            "timezone": text("timezone") or "UTC",
+            "currency": text("currency") or "SEK",
+            "default_weekly_hours": text("default_weekly_hours") or "40",
+            "weekly_overtime_threshold_hours": text("weekly_overtime_threshold_hours") or "40",
+            "overtime_multiplier": text("overtime_multiplier") or "1.5",
+            "pay_period_type": text("pay_period_type") or "monthly",
+            "biweekly_anchor": text("biweekly_anchor") or "",
+            "rounding_minutes": text("rounding_minutes") or "0",
+            "auto_break_minutes": text("auto_break_minutes") or "0",
+            "auto_break_after_hours": text("auto_break_after_hours") or "6",
+            "vacation_days_per_year": text("vacation_days_per_year") or "25",
+            "premium_rules": parse_json(text("premium_rules"), "Premium windows", []),
+            "holidays": parse_json(text("holidays"), "Holidays", []),
+            "email_notifications_enabled": form.get("email_notifications_enabled") == "1",
+            "smtp_host": text("smtp_host") or None,
+            "smtp_port": text("smtp_port") or "587",
+            "smtp_username": text("smtp_username") or None,
+            "smtp_from": text("smtp_from") or None,
+            "smtp_use_tls": form.get("smtp_use_tls") == "1",
+        }
+        if text("smtp_password"):
+            changes["smtp_password"] = text("smtp_password")
+        company.update_company(db, actor=user, **changes)
+        return "Settings saved"
+
+    return guarded(request, db, "/settings", work)
+
+
+@web_router.post("/settings/test-email")
+def settings_test_email(request: Request, db: DbSession, user: AdminUser, to: FormStr) -> Response:
+    row = company.get_company(db)
+    try:
+        sent = mailer.send(
+            row, to, "Nexum test e-mail", "If you can read this, e-mail delivery works."
+        )
+    except Exception as exc:  # SMTP errors are the whole point of the button
+        flash(request, f"Sending failed: {exc}", "error")
+        return redirect("/settings")
+    flash(
+        request,
+        f"Test e-mail sent to {to}" if sent else "E-mail is not configured",
+        "success" if sent else "error",
+    )
+    return redirect("/settings")
 
 
 # --- employee self-service ------------------------------------------------------------------------

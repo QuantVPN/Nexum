@@ -105,15 +105,14 @@ def seed(
         User,
     )
     from nexum.models.types import utcnow
-    from nexum.services import payroll, people, scheduling, time_tracking
-    from nexum.services.calendar import week_start, week_window
+    from nexum.services import company, payroll, people, scheduling, time_tracking
+    from nexum.services.calendar import today, week_start, week_window
     from nexum.services.events import commit_and_dispatch
 
     init_db(drop=reset)
     rng = random.Random(42)
     password = "demo1234"
     now = utcnow()
-    this_monday = week_start(now.date())
 
     with session_scope() as session:
         if session.scalar(select(User).where(User.email == "admin@nexum.local")) is not None:
@@ -124,6 +123,46 @@ def seed(
         install_recipes(session)
         engine = get_engine()
         engine.subscribe()
+        company.update_company(
+            session,
+            name="Nexum Demo AB",
+            timezone="Europe/Stockholm",
+            currency="SEK",
+            premium_rules=[
+                {
+                    "label": "Evening",
+                    "weekdays": [0, 1, 2, 3, 4],
+                    "start": "18:00",
+                    "end": "23:00",
+                    "multiplier": 1.2,
+                },
+                {
+                    "label": "Night",
+                    "weekdays": [0, 1, 2, 3, 4, 5, 6],
+                    "start": "23:00",
+                    "end": "06:00",
+                    "multiplier": 1.5,
+                },
+                {
+                    "label": "Weekend",
+                    "weekdays": [5, 6],
+                    "start": "00:00",
+                    "end": "00:00",
+                    "multiplier": 1.5,
+                },
+            ],
+            holidays=[
+                {"date": "2026-12-24", "label": "Christmas Eve", "multiplier": 2.0},
+                {"date": "2026-12-25", "label": "Christmas Day", "multiplier": 2.0},
+                {"date": "2026-12-26", "label": "Boxing Day", "multiplier": 2.0},
+                {"date": "2026-12-31", "label": "New Year's Eve", "multiplier": 2.0},
+                {"date": "2027-01-01", "label": "New Year's Day", "multiplier": 2.0},
+            ],
+            auto_break_minutes=30,
+            auto_break_after_hours="6",
+            rounding_minutes=5,
+        )
+        this_monday = week_start(today())
 
         admin = people.create_user(
             session,
