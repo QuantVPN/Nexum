@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 
 from nexum.api.deps import AdminUser, CurrentEmployee, DbSession, ManagerUser
 from nexum.api.schemas import PayPeriodDetailOut, PayPeriodIn, PayPeriodOut, PayslipOut
 from nexum.models import PayPeriod
 from nexum.models.types import utcnow
-from nexum.services import payroll
+from nexum.services import payroll, people
+from nexum.services.calendar import today
 from nexum.services.events import commit_and_dispatch
 
 router = APIRouter(prefix="/payroll", tags=["payroll"])
@@ -45,6 +49,17 @@ def current(db: DbSession, _: ManagerUser) -> PayPeriodDetailOut:
 @router.get("/periods/{period_id}", response_model=PayPeriodDetailOut)
 def get_period(period_id: int, db: DbSession, _: ManagerUser) -> PayPeriodDetailOut:
     return _detail(payroll.get_period(db, period_id))
+
+
+@router.get("/periods/{period_id}/export.csv", response_class=PlainTextResponse)
+def export_period(period_id: int, db: DbSession, _: ManagerUser) -> PlainTextResponse:
+    period = payroll.get_period(db, period_id)
+    filename = f"payroll-{period.start_date}-{period.end_date}.csv"
+    return PlainTextResponse(
+        payroll.export_csv(period),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/periods/{period_id}/compute", response_model=PayPeriodDetailOut)
@@ -87,11 +102,19 @@ def my_estimate(db: DbSession, employee: CurrentEmployee) -> PayslipOut:
         employee_id=employee.id,
         regular_hours=calc.regular_hours,
         overtime_hours=calc.overtime_hours,
+        premium_hours=calc.premium_hours,
         base_amount=calc.base_amount,
         overtime_amount=calc.overtime_amount,
+        premium_amount=calc.premium_amount,
         adjustments_amount=calc.adjustments_amount,
         gross_amount=calc.gross_amount,
         currency=employee.currency,
         details=calc.details,
         generated_at=utcnow(),
     )
+
+
+@router.get("/me/vacation")
+def my_vacation(db: DbSession, employee: CurrentEmployee) -> dict[str, Any]:
+    rules = payroll.payroll_rules(db)
+    return people.vacation_balance(db, employee, rules.vacation_days_per_year, today())

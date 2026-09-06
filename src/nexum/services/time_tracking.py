@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from nexum.errors import ConflictError, NotFoundError, ValidationError
 from nexum.models import Employee, Shift, ShiftStatus, TimeEntry, TimeEntryStatus, User
 from nexum.services import audit
+from nexum.services.company import PayrollRules
 from nexum.services.events import emit
 
 
@@ -162,3 +164,46 @@ def shifts_missing_entries(session: Session, start: datetime, end: datetime) -> 
         .order_by(Shift.ends_at)
     )
     return list(session.scalars(stmt))
+
+
+# --- paid time under the company rules ---------------------------------------------------------
+
+
+def paid_minutes(
+    start: datetime,
+    end: datetime,
+    *,
+    break_minutes: int,
+    rules: PayrollRules,
+    apply_rounding: bool = True,
+) -> int:
+    """Minutes that count for pay: span minus the explicit break (or the automatic unpaid
+    break once the span exceeds ``auto_break_after_hours``), rounded to ``rounding_minutes``."""
+    span = max(int((end - start).total_seconds() // 60), 0)
+    deduction = break_minutes
+    if deduction <= 0 and rules.auto_break_minutes > 0:
+        threshold_minutes = int(rules.auto_break_after_hours * 60)
+        if span > threshold_minutes:
+            deduction = rules.auto_break_minutes
+    paid = max(span - deduction, 0)
+    if apply_rounding and rules.rounding_minutes > 0:
+        step = rules.rounding_minutes
+        paid = int((Decimal(paid) / step).quantize(Decimal("1"), rounding=ROUND_HALF_UP)) * step
+    return paid
+
+
+def entry_paid_hours(entry: TimeEntry, rules: PayrollRules) -> Decimal:
+    if entry.clock_out is None:
+        return Decimal("0")
+    minutes = paid_minutes(
+        entry.clock_in, entry.clock_out, break_minutes=entry.break_minutes, rules=rules
+    )
+    return (Decimal(minutes) / Decimal(60)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def shift_paid_hours(shift: Shift, rules: PayrollRules) -> Decimal:
+    """Scheduled shifts fall back to the automatic break rule but are never rounded."""
+    minutes = paid_minutes(
+        shift.starts_at, shift.ends_at, break_minutes=0, rules=rules, apply_rounding=False
+    )
+    return (Decimal(minutes) / Decimal(60)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

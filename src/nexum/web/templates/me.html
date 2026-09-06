@@ -5,6 +5,7 @@
   <div class="tile"><span class="label">Next shift</span><span class="value">{% if o.next_shift %}{{ o.next_shift.starts_at|dt }}{% else %}—{% endif %}</span><span class="sub">{% if o.next_shift %}until {{ o.next_shift.ends_at|t }} · {{ o.next_shift.department.name }}{% else %}nothing scheduled{% endif %}</span></div>
   <div class="tile"><span class="label">This week</span><span class="value">{{ o.week_hours|hours }}</span><span class="sub">of {{ o.weekly_hours_target }} h</span></div>
   <div class="tile accent"><span class="label">Estimated pay {{ o.current_period.label }}</span><span class="value">{{ o.current_estimate.gross_amount|money(o.employee.currency) }}</span><span class="sub">{{ o.current_estimate.regular_hours }} h + {{ o.current_estimate.overtime_hours }} h overtime</span></div>
+  <div class="tile"><span class="label">Vacation {{ o.vacation.year }}</span><span class="value">{{ o.vacation.remaining }} d</span><span class="sub">of {{ o.vacation.entitlement }} · {{ o.vacation.taken }} taken</span></div>
   <div class="tile"><span class="label">Time clock</span>
     {% if o.open_time_entry %}
       <span class="value">Clocked in</span><span class="sub">since {{ o.open_time_entry.clock_in|dt }}</span>

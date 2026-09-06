@@ -137,9 +137,14 @@ def employee_overview(
     unread = notifications.unread_count(session, employee.user) if employee.user else 0
     open_entry = time_tracking.open_entry(session, employee.id)
     claimable = scheduling.claimable_shifts(session, employee, now, now + timedelta(days=14))
+    rules = payroll.payroll_rules(session)
+    vacation = people.vacation_balance(
+        session, employee, rules.vacation_days_per_year, local_date(now)
+    )
     return {
         "employee": employee,
         "claimable_count": len(claimable),
+        "vacation": vacation,
         "upcoming_shifts": upcoming,
         "next_shift": upcoming[0] if upcoming else None,
         "week_hours": week_hours,

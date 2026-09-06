@@ -443,3 +443,37 @@ def update_employee(
         fields=sorted(fields),
     )
     return employee
+
+
+# --- vacation ----------------------------------------------------------------------------------
+
+
+def vacation_balance(
+    session: Session, employee: Employee, days_per_year: Decimal, as_of: date
+) -> dict[str, Any]:
+    """Simple even accrual: ``days_per_year`` earned evenly over the calendar year for the
+    part of the year the employee is employed; approved vacation weekdays are taken."""
+    year_start, year_end = date(as_of.year, 1, 1), date(as_of.year, 12, 31)
+    year_days = (year_end - year_start).days + 1
+    employed_from = max(employee.start_date, year_start)
+    employed_to = min(employee.end_date or year_end, year_end)
+    if employed_to < employed_from:
+        entitlement = accrued = Decimal("0")
+    else:
+        employed_days = (employed_to - employed_from).days + 1
+        entitlement = days_per_year * Decimal(employed_days) / Decimal(year_days)
+        accrued_until = min(as_of, employed_to)
+        accrued_days = max((accrued_until - employed_from).days + 1, 0)
+        accrued = days_per_year * Decimal(accrued_days) / Decimal(year_days)
+    taken_days = approved_time_off_days(
+        session, employee.id, year_start, year_end, kinds=(TimeOffKind.VACATION,)
+    )
+    taken = Decimal(sum(1 for d in taken_days if d.weekday() < 5))
+    quant = Decimal("0.1")
+    return {
+        "year": as_of.year,
+        "entitlement": entitlement.quantize(quant),
+        "accrued": accrued.quantize(quant),
+        "taken": taken,
+        "remaining": (entitlement - taken).quantize(quant),
+    }

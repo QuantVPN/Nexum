@@ -23,6 +23,7 @@
       <dt>Estimated gross</dt><dd>{{ o.current_estimate.gross_amount|money(employee.currency) }} ({{ o.current_period.label }})</dd>
       <dt>Overtime</dt><dd>{{ o.current_estimate.overtime_hours }} h</dd>
       <dt>Next shift</dt><dd>{% if o.next_shift %}{{ o.next_shift.starts_at|dt }}–{{ o.next_shift.ends_at|t }}{% else %}none scheduled{% endif %}</dd>
+      <dt>Vacation {{ o.vacation.year }}</dt><dd>{{ o.vacation.remaining }} of {{ o.vacation.entitlement }} days left ({{ o.vacation.taken }} taken)</dd>
     </dl>
   </section>
 </div>

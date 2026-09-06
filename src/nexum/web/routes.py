@@ -34,6 +34,7 @@ from nexum.models import (
     AvailabilityRule,
     Employee,
     EmploymentType,
+    Payslip,
     PayType,
     Role,
     ScheduleTemplate,
@@ -778,6 +779,41 @@ def payroll_detail(request: Request, db: DbSession, user: ManagerUser, period_id
     )
 
 
+@web_router.get("/payroll/{period_id}/export.csv")
+def payroll_export(db: DbSession, user: ManagerUser, period_id: int) -> Response:
+    period = payroll.get_period(db, period_id)
+    filename = f"payroll-{period.start_date}-{period.end_date}.csv"
+    return PlainTextResponse(
+        payroll.export_csv(period),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _render_payslip(request: Request, db: Session, user: User, payslip: Payslip) -> Response:
+    return render(
+        request,
+        "payslip.html",
+        db=db,
+        user=user,
+        title=f"Payslip {payslip.pay_period.label}",
+        slip=payslip,
+        period=payslip.pay_period,
+        employee=payslip.employee,
+        company_name=company.get_company(db).name,
+    )
+
+
+@web_router.get("/payroll/{period_id}/payslips/{payslip_id}", response_class=HTMLResponse)
+def payroll_payslip(
+    request: Request, db: DbSession, user: ManagerUser, period_id: int, payslip_id: int
+) -> Response:
+    slip = db.get(Payslip, payslip_id)
+    if slip is None or slip.pay_period_id != period_id:
+        raise NotFoundError("Payslip not found")
+    return _render_payslip(request, db, user, slip)
+
+
 @web_router.post("/payroll/{period_id}/{action}")
 def payroll_action(
     request: Request, db: DbSession, user: AdminUser, period_id: int, action: str
@@ -1268,7 +1304,21 @@ def me_pay(request: Request, db: DbSession, user: CurrentUser) -> Response:
         period=period,
         estimate=estimate,
         payslips=payroll.payslips_for_employee(db, employee.id),
+        vacation=people.vacation_balance(
+            db, employee, payroll.payroll_rules(db).vacation_days_per_year, today()
+        ),
     )
+
+
+@web_router.get("/me/pay/{payslip_id}", response_class=HTMLResponse)
+def me_payslip(request: Request, db: DbSession, user: CurrentUser, payslip_id: int) -> Response:
+    employee = _employee_or_notice(request, db, user)
+    if isinstance(employee, Response):
+        return employee
+    slip = db.get(Payslip, payslip_id)
+    if slip is None or slip.employee_id != employee.id:
+        raise NotFoundError("Payslip not found")
+    return _render_payslip(request, db, user, slip)
 
 
 @web_router.get("/me/time", response_class=HTMLResponse)

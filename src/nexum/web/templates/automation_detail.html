@@ -7,7 +7,7 @@
     <form method="post" action="/automations/{{ rule.id }}/run">{{ csrf_input }}<button class="btn btn-sm btn-primary">Run now</button></form>
     {% if current_user.has_role(Role.ADMIN) %}
       <form method="post" action="/automations/{{ rule.id }}/toggle">{{ csrf_input }}<button class="btn btn-sm">{{ 'Disable' if rule.enabled else 'Enable' }}</button></form>
-      <form method="post" action="/automations/{{ rule.id }}/delete" onsubmit="return confirm('Delete this rule and its history?')">{{ csrf_input }}<button class="btn btn-sm btn-ghost">Delete</button></form>
+      <form method="post" action="/automations/{{ rule.id }}/delete" data-confirm="Delete this rule and its history?">{{ csrf_input }}<button class="btn btn-sm btn-ghost">Delete</button></form>
     {% endif %}
   </div>
 </div>

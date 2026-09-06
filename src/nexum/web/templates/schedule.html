@@ -8,13 +8,13 @@
     <a class="btn btn-sm" href="/schedule?week={{ next_week|d }}{% if department_id %}&department_id={{ department_id }}{% endif %}">Next →</a>
     <form method="get" action="/schedule" class="row">
       <input type="hidden" name="week" value="{{ week|d }}">
-      <select name="department_id" onchange="this.form.submit()">
+      <select name="department_id" data-autosubmit>
         <option value="">All departments</option>
         {% for d in departments %}<option value="{{ d.id }}" {{ 'selected' if d.id == department_id }}>{{ d.name }}</option>{% endfor %}
       </select>
     </form>
     <a class="btn btn-sm btn-ghost" href="/templates">Templates</a>
-    <a class="btn btn-sm btn-ghost" href="#" onclick="window.print();return false;">Print</a>
+    <a class="btn btn-sm btn-ghost" href="#" data-print>Print</a>
   </div>
 </div>
 

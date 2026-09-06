@@ -2,19 +2,24 @@
 
 Rules come from company settings (:mod:`nexum.services.company`):
 
-* Hours per ISO week = approved time entries + published shifts that have no time entry.
+* Paid hours per ISO week = approved time entries (minus breaks, rounded per the rules)
+  + published shifts that have no time entry.
 * Hours above the weekly overtime threshold count as overtime.
+* Premium windows (evenings, nights, weekends) and public holidays pay an *extra*
+  ``(multiplier - 1)`` on the hours inside them; where windows overlap, the highest
+  multiplier applies.
 * Monthly employees: base salary (pro-rated when the period is not a full month or a
-  bi-weekly period), minus approved unpaid leave, plus overtime at
-  ``hourly equivalent * multiplier``.
-* Hourly employees: regular hours * rate + overtime hours * rate * multiplier.
+  bi-weekly period), minus approved unpaid leave, plus overtime and premiums at the
+  hourly equivalent of their salary.
+* Hourly employees: regular hours * rate + overtime hours * rate * multiplier + premiums.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from itertools import pairwise
 from typing import Any
 
 from sqlalchemy import select
@@ -38,16 +43,19 @@ from nexum.services import audit
 from nexum.services.calendar import (
     days_between,
     iter_weeks,
+    local_date,
+    local_datetime,
     month_bounds,
     period_window,
+    shift_days,
     today,
     week_window,
 )
-from nexum.services.company import PayrollRules, get_company, payroll_rules
+from nexum.services.company import PayrollRules, PremiumWindow, get_company, payroll_rules
 from nexum.services.events import emit
 from nexum.services.people import approved_time_off_days, list_employees
 from nexum.services.scheduling import list_shifts
-from nexum.services.time_tracking import entries_in_window
+from nexum.services.time_tracking import entries_in_window, entry_paid_hours, shift_paid_hours
 
 CENT = Decimal("0.01")
 WEEKS_PER_MONTH = Decimal("52") / Decimal("12")
@@ -63,6 +71,7 @@ __all__ = [
     "current_period",
     "effective_hours_by_week",
     "employees_in_period",
+    "export_csv",
     "get_or_create_period",
     "get_period",
     "hours",
@@ -72,6 +81,7 @@ __all__ = [
     "payroll_rules",
     "payslips_for_employee",
     "period_totals",
+    "premium_segments",
     "previous_period",
     "reference_datetime",
 ]
@@ -86,20 +96,32 @@ def hours(value: Decimal | float | int) -> Decimal:
 
 
 @dataclass
+class PaidInterval:
+    start: datetime
+    end: datetime
+    paid_hours: Decimal
+    source: str  # "entry" | "shift"
+
+
+@dataclass
 class WeekHours:
     week_start: date
     regular: Decimal
     overtime: Decimal
     from_entries: Decimal
     from_shifts: Decimal
+    premium_hours: dict[str, Decimal] = field(default_factory=dict)  # label -> hours
+    premium_extra_factor_hours: Decimal = Decimal("0")  # sum(hours * (multiplier - 1))
 
 
 @dataclass
 class PayslipCalculation:
     regular_hours: Decimal
     overtime_hours: Decimal
+    premium_hours: Decimal
     base_amount: Decimal
     overtime_amount: Decimal
+    premium_amount: Decimal
     adjustments_amount: Decimal
     gross_amount: Decimal
     details: dict[str, Any]
@@ -155,6 +177,106 @@ def list_periods(session: Session, limit: int = 24) -> list[PayPeriod]:
     return list(session.scalars(stmt))
 
 
+def _window_bounds(window: PremiumWindow, day: date) -> tuple[datetime, datetime]:
+    start = local_datetime(day, window.start)
+    end = local_datetime(day, window.end)
+    if end <= start:
+        end += timedelta(days=1)
+    return start, end
+
+
+def _multiplier_at(moment: datetime, rules: PayrollRules) -> tuple[Decimal, str]:
+    """Highest premium multiplier (and its label) that applies at ``moment``."""
+    day = local_date(moment)
+    best = Decimal("1")
+    label = ""
+    holiday = rules.holidays.get(day)
+    if holiday is not None and holiday.multiplier > best:
+        best, label = holiday.multiplier, holiday.label
+    for window in rules.premium_windows:
+        for candidate in (day, day - timedelta(days=1)):
+            if candidate.weekday() not in window.weekdays:
+                continue
+            w0, w1 = _window_bounds(window, candidate)
+            if w0 <= moment < w1 and window.multiplier > best:
+                best, label = window.multiplier, window.label
+    return best, label
+
+
+def premium_segments(
+    start: datetime, end: datetime, rules: PayrollRules
+) -> list[tuple[datetime, datetime, Decimal, str]]:
+    """Split [start, end) into segments with a constant premium multiplier."""
+    if not rules.premium_windows and not rules.holidays:
+        return []
+    cuts: set[datetime] = {start, end}
+    for day in shift_days(start, end):
+        for candidate in (day - timedelta(days=1), day, day + timedelta(days=1)):
+            midnight = local_datetime(candidate, datetime.min.time())
+            if start < midnight < end:
+                cuts.add(midnight)
+            for window in rules.premium_windows:
+                if candidate.weekday() not in window.weekdays:
+                    continue
+                for edge in _window_bounds(window, candidate):
+                    if start < edge < end:
+                        cuts.add(edge)
+    points = sorted(cuts)
+    segments: list[tuple[datetime, datetime, Decimal, str]] = []
+    for a, b in pairwise(points):
+        multiplier, label = _multiplier_at(a, rules)
+        if multiplier > 1:
+            segments.append((a, b, multiplier, label))
+    return segments
+
+
+def premium_for_interval(
+    interval: PaidInterval, rules: PayrollRules
+) -> tuple[dict[str, Decimal], Decimal]:
+    """Premium hours by label and the summed ``hours * (multiplier - 1)`` for one interval.
+
+    Paid hours can be fewer than the span (breaks), so premium time is scaled by the paid
+    share of the span."""
+    span_hours = Decimal(str((interval.end - interval.start).total_seconds() / 3600))
+    if span_hours <= 0 or interval.paid_hours <= 0:
+        return {}, Decimal("0")
+    share = interval.paid_hours / span_hours
+    by_label: dict[str, Decimal] = {}
+    extra = Decimal("0")
+    for a, b, multiplier, label in premium_segments(interval.start, interval.end, rules):
+        seg_hours = Decimal(str((b - a).total_seconds() / 3600)) * share
+        by_label[label] = by_label.get(label, Decimal("0")) + seg_hours
+        extra += seg_hours * (multiplier - 1)
+    return {k: hours(v) for k, v in by_label.items()}, extra
+
+
+def paid_intervals(
+    session: Session, employee: Employee, lo: datetime, hi: datetime, rules: PayrollRules
+) -> list[PaidInterval]:
+    entries = entries_in_window(
+        session, lo, hi, employee_id=employee.id, statuses=(TimeEntryStatus.APPROVED,)
+    )
+    intervals: list[PaidInterval] = []
+    covered_shift_ids: set[int] = set()
+    for entry in entries:
+        if entry.clock_out is None:
+            continue
+        intervals.append(
+            PaidInterval(entry.clock_in, entry.clock_out, entry_paid_hours(entry, rules), "entry")
+        )
+        if entry.shift_id is not None:
+            covered_shift_ids.add(entry.shift_id)
+    for shift in list_shifts(
+        session, lo, hi, employee_id=employee.id, statuses=(ShiftStatus.PUBLISHED,)
+    ):
+        if shift.id in covered_shift_ids:
+            continue
+        intervals.append(
+            PaidInterval(shift.starts_at, shift.ends_at, shift_paid_hours(shift, rules), "shift")
+        )
+    return intervals
+
+
 def effective_hours_by_week(
     session: Session, employee: Employee, start: date, end: date, rules: PayrollRules
 ) -> list[WeekHours]:
@@ -164,20 +286,18 @@ def effective_hours_by_week(
     for monday in iter_weeks(start, end):
         w_start, w_end = week_window(monday)
         lo, hi = max(w_start, p_start), min(w_end, p_end)
-        entries = entries_in_window(
-            session, lo, hi, employee_id=employee.id, statuses=(TimeEntryStatus.APPROVED,)
-        )
-        from_entries = sum((hours(e.worked_hours) for e in entries), Decimal("0"))
-        covered_shift_ids = {e.shift_id for e in entries if e.shift_id is not None}
-        shifts = list_shifts(
-            session, lo, hi, employee_id=employee.id, statuses=(ShiftStatus.PUBLISHED,)
-        )
-        from_shifts = sum(
-            (hours(s.duration_hours) for s in shifts if s.id not in covered_shift_ids),
-            Decimal("0"),
-        )
+        intervals = paid_intervals(session, employee, lo, hi, rules)
+        from_entries = sum((i.paid_hours for i in intervals if i.source == "entry"), Decimal("0"))
+        from_shifts = sum((i.paid_hours for i in intervals if i.source == "shift"), Decimal("0"))
         total = from_entries + from_shifts
         overtime = max(total - threshold, Decimal("0"))
+        premium: dict[str, Decimal] = {}
+        extra = Decimal("0")
+        for interval in intervals:
+            by_label, interval_extra = premium_for_interval(interval, rules)
+            for label, value in by_label.items():
+                premium[label] = premium.get(label, Decimal("0")) + value
+            extra += interval_extra
         weeks.append(
             WeekHours(
                 week_start=monday,
@@ -185,6 +305,8 @@ def effective_hours_by_week(
                 overtime=hours(overtime),
                 from_entries=hours(from_entries),
                 from_shifts=hours(from_shifts),
+                premium_hours={k: hours(v) for k, v in premium.items()},
+                premium_extra_factor_hours=extra,
             )
         )
     return weeks
@@ -207,6 +329,12 @@ def calculate_payslip(
     weeks = effective_hours_by_week(session, employee, period.start_date, period.end_date, rules)
     regular = sum((w.regular for w in weeks), Decimal("0"))
     overtime = sum((w.overtime for w in weeks), Decimal("0"))
+    premium_extra = sum((w.premium_extra_factor_hours for w in weeks), Decimal("0"))
+    premium_by_label: dict[str, Decimal] = {}
+    for w in weeks:
+        for label, value in w.premium_hours.items():
+            premium_by_label[label] = premium_by_label.get(label, Decimal("0")) + value
+    premium_hours = hours(sum(premium_by_label.values(), Decimal("0")))
     multiplier = rules.overtime_multiplier
     details: dict[str, Any] = {
         "pay_type": employee.pay_type.value,
@@ -217,11 +345,15 @@ def calculate_payslip(
                 "overtime_hours": str(w.overtime),
                 "from_time_entries": str(w.from_entries),
                 "from_shifts": str(w.from_shifts),
+                "premium_hours": {k: str(v) for k, v in w.premium_hours.items()},
             }
             for w in weeks
         ],
         "overtime_multiplier": str(multiplier),
         "weekly_overtime_threshold_hours": str(rules.weekly_overtime_threshold_hours),
+        "premiums": {k: str(hours(v)) for k, v in premium_by_label.items()},
+        "rounding_minutes": rules.rounding_minutes,
+        "auto_break_minutes": rules.auto_break_minutes,
     }
     adjustments = Decimal("0")
 
@@ -229,6 +361,7 @@ def calculate_payslip(
         rate = employee.hourly_rate
         base = money(regular * rate)
         overtime_amount = money(overtime * rate * multiplier)
+        premium_amount = money(premium_extra * rate)
         details["hourly_rate"] = str(rate)
     else:
         proration = _monthly_proration(rules, period)
@@ -236,6 +369,7 @@ def calculate_payslip(
         weekly_hours = employee.weekly_hours or Decimal("40")
         hourly_equivalent = employee.monthly_salary / (weekly_hours * WEEKS_PER_MONTH)
         overtime_amount = money(overtime * hourly_equivalent * multiplier)
+        premium_amount = money(premium_extra * hourly_equivalent)
         unpaid_days = approved_time_off_days(
             session, employee.id, period.start_date, period.end_date, kinds=(TimeOffKind.UNPAID,)
         )
@@ -252,12 +386,14 @@ def calculate_payslip(
             }
         )
 
-    gross = money(base + overtime_amount + adjustments)
+    gross = money(base + overtime_amount + premium_amount + adjustments)
     return PayslipCalculation(
         regular_hours=hours(regular),
         overtime_hours=hours(overtime),
+        premium_hours=premium_hours,
         base_amount=base,
         overtime_amount=overtime_amount,
+        premium_amount=premium_amount,
         adjustments_amount=money(adjustments),
         gross_amount=gross,
         details=details,
@@ -294,8 +430,10 @@ def compute_payslips(
             period.payslips.append(slip)
         slip.regular_hours = calc.regular_hours
         slip.overtime_hours = calc.overtime_hours
+        slip.premium_hours = calc.premium_hours
         slip.base_amount = calc.base_amount
         slip.overtime_amount = calc.overtime_amount
+        slip.premium_amount = calc.premium_amount
         slip.adjustments_amount = calc.adjustments_amount
         slip.gross_amount = calc.gross_amount
         slip.currency = employee.currency or period.currency
@@ -351,8 +489,69 @@ def mark_paid(session: Session, period: PayPeriod, *, actor: User | None = None)
 def period_totals(period: PayPeriod) -> dict[str, Decimal]:
     gross = sum((p.gross_amount for p in period.payslips), Decimal("0"))
     overtime = sum((p.overtime_amount for p in period.payslips), Decimal("0"))
+    premium = sum((p.premium_amount for p in period.payslips), Decimal("0"))
     ot_hours = sum((p.overtime_hours for p in period.payslips), Decimal("0"))
-    return {"gross": money(gross), "overtime": money(overtime), "overtime_hours": hours(ot_hours)}
+    premium_hours = sum((p.premium_hours for p in period.payslips), Decimal("0"))
+    return {
+        "gross": money(gross),
+        "overtime": money(overtime),
+        "overtime_hours": hours(ot_hours),
+        "premium": money(premium),
+        "premium_hours": hours(premium_hours),
+    }
+
+
+EXPORT_COLUMNS: tuple[str, ...] = (
+    "employee_id",
+    "employee",
+    "email",
+    "department",
+    "pay_type",
+    "regular_hours",
+    "overtime_hours",
+    "premium_hours",
+    "base_amount",
+    "overtime_amount",
+    "premium_amount",
+    "adjustments_amount",
+    "gross_amount",
+    "currency",
+)
+
+
+def export_csv(period: PayPeriod) -> str:
+    """Bookkeeping-friendly CSV (one row per payslip, semicolon separated for spreadsheets)."""
+    import csv
+    import io
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
+    writer.writerow(["period_start", "period_end", *EXPORT_COLUMNS])
+    for slip in sorted(
+        period.payslips, key=lambda p: (p.employee.last_name, p.employee.first_name)
+    ):
+        employee = slip.employee
+        writer.writerow(
+            [
+                period.start_date.isoformat(),
+                period.end_date.isoformat(),
+                employee.id,
+                employee.full_name,
+                employee.email,
+                employee.department.name if employee.department else "",
+                employee.pay_type.value,
+                slip.regular_hours,
+                slip.overtime_hours,
+                slip.premium_hours,
+                slip.base_amount,
+                slip.overtime_amount,
+                slip.premium_amount,
+                slip.adjustments_amount,
+                slip.gross_amount,
+                slip.currency,
+            ]
+        )
+    return buffer.getvalue()
 
 
 def payslips_for_employee(session: Session, employee_id: int, limit: int = 12) -> list[Payslip]:

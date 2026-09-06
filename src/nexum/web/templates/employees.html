@@ -19,7 +19,7 @@
           <td>{% if e.pay_type.value == 'hourly' %}{{ e.hourly_rate|money(e.currency) }}/h{% else %}{{ e.monthly_salary|money(e.currency) }}/month{% endif %}</td>
           <td>{{ e.weekly_hours }}</td>
           <td>{% if e.user %}<span class="badge">{{ e.user.role.value }}</span>{% else %}<span class="muted">none</span>{% endif %}</td>
-          <td>{% if e.is_active %}<form method="post" action="/employees/{{ e.id }}/deactivate" onsubmit="return confirm('Deactivate {{ e.full_name }}?')">{{ csrf_input }}<button class="btn btn-sm btn-ghost">Deactivate</button></form>{% else %}<span class="badge badge-muted">inactive</span>{% endif %}</td>
+          <td>{% if e.is_active %}<form method="post" action="/employees/{{ e.id }}/deactivate" data-confirm="Deactivate {{ e.full_name }}?">{{ csrf_input }}<button class="btn btn-sm btn-ghost">Deactivate</button></form>{% else %}<span class="badge badge-muted">inactive</span>{% endif %}</td>
         </tr>
       {% else %}
         <tr><td colspan="7" class="muted">No employees yet. Add the first one on the right.</td></tr>

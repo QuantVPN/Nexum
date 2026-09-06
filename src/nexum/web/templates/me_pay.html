@@ -9,6 +9,7 @@
       <dt>Overtime hours</dt><dd>{{ estimate.overtime_hours }}</dd>
       <dt>Base</dt><dd>{{ estimate.base_amount|money(employee.currency) }}</dd>
       <dt>Overtime</dt><dd>{{ estimate.overtime_amount|money(employee.currency) }}</dd>
+      <dt>Premiums</dt><dd>{{ estimate.premium_amount|money(employee.currency) }} ({{ estimate.premium_hours }} h{% if estimate.details.get('premiums') %}: {% for k, v in estimate.details.premiums.items() %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %})</dd>
       <dt>Adjustments</dt><dd>{{ estimate.adjustments_amount|money(employee.currency) }}</dd>
       <dt><strong>Gross</strong></dt><dd><strong>{{ estimate.gross_amount|money(employee.currency) }}</strong></dd>
     </dl>
@@ -19,9 +20,18 @@
     </details>
   </section>
   <section class="card">
+    <h2>Vacation {{ vacation.year }}</h2>
+    <dl class="dl">
+      <dt>Entitlement</dt><dd>{{ vacation.entitlement }} days</dd>
+      <dt>Accrued so far</dt><dd>{{ vacation.accrued }} days</dd>
+      <dt>Taken / approved</dt><dd>{{ vacation.taken }} days</dd>
+      <dt><strong>Remaining</strong></dt><dd><strong>{{ vacation.remaining }} days</strong></dd>
+    </dl>
+  </section>
+  <section class="card">
     <h2>Payslips</h2>
     <table><thead><tr><th>Period</th><th>Hours</th><th>Gross</th><th>Status</th></tr></thead><tbody>
-    {% for p in payslips %}<tr><td>{{ p.pay_period.label }}</td><td>{{ p.regular_hours }} + {{ p.overtime_hours }} OT</td><td><strong>{{ p.gross_amount|money(p.currency) }}</strong></td><td><span class="badge badge-{{ p.pay_period.status.value }}">{{ p.pay_period.status.value }}</span></td></tr>{% else %}<tr><td colspan="4" class="muted">No payslips yet.</td></tr>{% endfor %}
+    {% for p in payslips %}<tr><td><a href="/me/pay/{{ p.id }}">{{ p.pay_period.label }}</a></td><td>{{ p.regular_hours }} + {{ p.overtime_hours }} OT</td><td><strong>{{ p.gross_amount|money(p.currency) }}</strong></td><td><span class="badge badge-{{ p.pay_period.status.value }}">{{ p.pay_period.status.value }}</span></td></tr>{% else %}<tr><td colspan="4" class="muted">No payslips yet.</td></tr>{% endfor %}
     </tbody></table>
   </section>
 </div>

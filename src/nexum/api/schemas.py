@@ -328,8 +328,10 @@ class PayslipOut(ORMModel):
     employee_id: int
     regular_hours: Decimal
     overtime_hours: Decimal
+    premium_hours: Decimal = Decimal("0")
     base_amount: Decimal
     overtime_amount: Decimal
+    premium_amount: Decimal = Decimal("0")
     adjustments_amount: Decimal
     gross_amount: Decimal
     currency: str
