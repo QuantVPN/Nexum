@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Time off</h1><nav class="subnav"><a href="/me">Overview</a><a href="/me/time">Time</a><a href="/me/pay">Pay</a><a href="/me/requests" class="active">Time off</a></nav></div>
+<div class="columns wide-left">
+  <section class="card">
+    <table><thead><tr><th>Kind</th><th>From</th><th>To</th><th>Days</th><th>Status</th><th>Reason</th></tr></thead><tbody>
+    {% for r in requests %}<tr><td>{{ r.kind.value }}</td><td>{{ r.start_date|d }}</td><td>{{ r.end_date|d }}</td><td>{{ r.days }}</td><td><span class="badge badge-{{ r.status.value }}">{{ r.status.value }}</span></td><td class="muted">{{ r.reason or '' }}</td></tr>{% else %}<tr><td colspan="6" class="muted">No requests yet.</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+  <section class="card">
+    <h2>New request</h2>
+    <form method="post" action="/me/requests" class="stack">
+      <label>Kind <select name="kind">{% for k in kinds %}<option value="{{ k }}">{{ k }}</option>{% endfor %}</select></label>
+      <label>From <input type="date" name="start_date" required></label>
+      <label>To <input type="date" name="end_date" required></label>
+      <label>Reason <input name="reason"></label>
+      <button class="btn btn-primary">Send request</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Payroll</h1><span class="muted">Current period: <a href="/payroll/{{ current.id }}">{{ current.label }}</a></span></div>
+<div class="columns wide-left">
+  <section class="card">
+    <table><thead><tr><th>Period</th><th>Status</th><th>Payslips</th><th>Gross</th><th>Overtime</th><th></th></tr></thead><tbody>
+    {% for p, totals in periods %}
+      <tr><td>{{ p.label }}</td><td><span class="badge badge-{{ p.status.value }}">{{ p.status.value }}</span></td><td>{{ p.payslips|length }}</td><td>{{ totals.gross|money(p.currency) }}</td><td>{{ totals.overtime_hours }} h</td><td><a class="btn btn-xs" href="/payroll/{{ p.id }}">Open</a></td></tr>
+    {% else %}<tr><td colspan="6" class="muted">No pay periods yet.</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+  <aside class="card">
+    <h2>How payroll works</h2>
+    <ol class="list compact">
+      <li>Hours per ISO week = approved time entries + published shifts without an entry.</li>
+      <li>Above {{ settings.weekly_overtime_threshold_hours }} h/week counts as overtime at ×{{ settings.overtime_multiplier }}.</li>
+      <li>Monthly pay is pro-rated for partial periods; approved unpaid leave is deducted per workday.</li>
+      <li>The nightly automation refreshes previews; the monthly automation closes last month on the 1st.</li>
+    </ol>
+    {% if current_user.has_role(Role.ADMIN) %}
+    <h3>Create period</h3>
+    <form method="post" action="/payroll/periods" class="stack">
+      <label>Start <input type="date" name="start_date" required></label>
+      <label>End <input type="date" name="end_date" required></label>
+      <button class="btn">Create</button>
+    </form>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

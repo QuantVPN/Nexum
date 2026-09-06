@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>My time</h1><nav class="subnav"><a href="/me">Overview</a><a href="/me/time" class="active">Time</a><a href="/me/pay">Pay</a><a href="/me/requests">Time off</a></nav></div>
+<div class="columns wide-left">
+  <section class="card">
+    <table><thead><tr><th>In</th><th>Out</th><th>Break</th><th>Hours</th><th>Status</th><th>Note</th></tr></thead><tbody>
+    {% for e in entries %}<tr><td>{{ e.clock_in|dt }}</td><td>{{ e.clock_out|dt }}</td><td>{{ e.break_minutes }} min</td><td>{{ '%.2f'|format(e.worked_hours) }}</td><td><span class="badge badge-{{ e.status.value }}">{{ e.status.value }}</span></td><td class="muted">{{ e.note or '' }}</td></tr>{% else %}<tr><td colspan="6" class="muted">No time entries yet.</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+  <section class="card">
+    <h2>Report hours</h2>
+    <form method="post" action="/me/time/entries" class="stack">
+      <label>For shift <select name="shift_id"><option value="">— not linked —</option>{% for s in recent_shifts %}<option value="{{ s.id }}">{{ s.starts_at|dt }}–{{ s.ends_at|t }}</option>{% endfor %}</select></label>
+      <label>Clock in <input type="datetime-local" name="clock_in" required></label>
+      <label>Clock out <input type="datetime-local" name="clock_out" required></label>
+      <label>Break (minutes) <input type="number" name="break_minutes" value="30" min="0"></label>
+      <label>Note <input name="note"></label>
+      <button class="btn btn-primary">Submit for approval</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

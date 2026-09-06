@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Notifications</h1><form method="post" action="/notifications/read-all"><button class="btn btn-sm">Mark all read</button></form></div>
+<section class="card">
+  <ul class="list notifications">
+    {% for n in items %}
+      <li class="{{ 'unread' if not n.is_read }} level-{{ n.level.value }}">
+        <div><strong>{% if n.link %}<a href="{{ n.link }}">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}</strong> <span class="muted">{{ n.created_at|dt }}</span></div>
+        {% if n.body %}<pre class="body">{{ n.body }}</pre>{% endif %}
+      </li>
+    {% else %}<li class="muted">No notifications.</li>{% endfor %}
+  </ul>
+</section>
+{% endblock %}

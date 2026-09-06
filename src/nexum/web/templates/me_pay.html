@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>My pay</h1><nav class="subnav"><a href="/me">Overview</a><a href="/me/time">Time</a><a href="/me/pay" class="active">Pay</a><a href="/me/requests">Time off</a></nav></div>
+<div class="columns">
+  <section class="card">
+    <h2>Estimate for {{ period.label }} <span class="badge badge-{{ period.status.value }}">{{ period.status.value }}</span></h2>
+    <dl class="dl">
+      <dt>Regular hours</dt><dd>{{ estimate.regular_hours }}</dd>
+      <dt>Overtime hours</dt><dd>{{ estimate.overtime_hours }}</dd>
+      <dt>Base</dt><dd>{{ estimate.base_amount|money(employee.currency) }}</dd>
+      <dt>Overtime</dt><dd>{{ estimate.overtime_amount|money(employee.currency) }}</dd>
+      <dt>Adjustments</dt><dd>{{ estimate.adjustments_amount|money(employee.currency) }}</dd>
+      <dt><strong>Gross</strong></dt><dd><strong>{{ estimate.gross_amount|money(employee.currency) }}</strong></dd>
+    </dl>
+    <details><summary>Week by week</summary>
+      <table><thead><tr><th>Week</th><th>Regular</th><th>Overtime</th><th>From entries</th><th>From shifts</th></tr></thead><tbody>
+      {% for w in estimate.details.weeks %}<tr><td>{{ w.week_start }}</td><td>{{ w.regular_hours }}</td><td>{{ w.overtime_hours }}</td><td>{{ w.from_time_entries }}</td><td>{{ w.from_shifts }}</td></tr>{% endfor %}
+      </tbody></table>
+    </details>
+  </section>
+  <section class="card">
+    <h2>Payslips</h2>
+    <table><thead><tr><th>Period</th><th>Hours</th><th>Gross</th><th>Status</th></tr></thead><tbody>
+    {% for p in payslips %}<tr><td>{{ p.pay_period.label }}</td><td>{{ p.regular_hours }} + {{ p.overtime_hours }} OT</td><td><strong>{{ p.gross_amount|money(p.currency) }}</strong></td><td><span class="badge badge-{{ p.pay_period.status.value }}">{{ p.pay_period.status.value }}</span></td></tr>{% else %}<tr><td colspan="4" class="muted">No payslips yet.</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+</div>
+{% endblock %}

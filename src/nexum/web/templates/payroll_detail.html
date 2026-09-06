@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Payroll {{ period.label }} <span class="badge badge-{{ period.status.value }}">{{ period.status.value }}</span></h1>
+  <div class="row">
+    <a class="btn btn-sm" href="/payroll">All periods</a>
+    {% if current_user.has_role(Role.ADMIN) %}
+      {% if period.status.value != 'paid' %}<form method="post" action="/payroll/{{ period.id }}/compute"><button class="btn btn-sm">Recompute</button></form>{% endif %}
+      {% if period.status.value == 'open' %}<form method="post" action="/payroll/{{ period.id }}/close" onsubmit="return confirm('Close this period? Payslips become final.')"><button class="btn btn-sm btn-primary">Close period</button></form>{% endif %}
+      {% if period.status.value == 'closed' %}<form method="post" action="/payroll/{{ period.id }}/pay"><button class="btn btn-sm btn-primary">Mark as paid</button></form>{% endif %}
+    {% endif %}
+  </div>
+</div>
+<section class="tiles">
+  <div class="tile"><span class="label">Gross total</span><span class="value">{{ totals.gross|money(period.currency) }}</span></div>
+  <div class="tile"><span class="label">Overtime pay</span><span class="value">{{ totals.overtime|money(period.currency) }}</span><span class="sub">{{ totals.overtime_hours }} h</span></div>
+  <div class="tile"><span class="label">Payslips</span><span class="value">{{ payslips|length }}</span></div>
+</section>
+<section class="card">
+  <table><thead><tr><th>Employee</th><th>Regular h</th><th>Overtime h</th><th>Base</th><th>Overtime</th><th>Adjustments</th><th>Gross</th><th></th></tr></thead><tbody>
+  {% for s in payslips %}
+    <tr><td>{{ s.employee.full_name }}<br><small class="muted">{{ s.details.get('pay_type', '') }}</small></td><td>{{ s.regular_hours }}</td><td>{{ s.overtime_hours }}</td><td>{{ s.base_amount|money }}</td><td>{{ s.overtime_amount|money }}</td><td>{{ s.adjustments_amount|money }}</td><td><strong>{{ s.gross_amount|money(s.currency) }}</strong></td>
+    <td><details><summary>details</summary><pre class="json">{{ s.details|pretty_json }}</pre></details></td></tr>
+  {% else %}<tr><td colspan="8" class="muted">No payslips yet — press Recompute.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

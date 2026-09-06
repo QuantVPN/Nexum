@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Employees</h1>
+  <div>
+    {% if show_inactive %}<a class="btn btn-sm" href="/employees">Hide inactive</a>{% else %}<a class="btn btn-sm" href="/employees?all=1">Show inactive</a>{% endif %}
+  </div>
+</div>
+<div class="columns wide-left">
+  <section class="card">
+    <table>
+      <thead><tr><th>Name</th><th>Department</th><th>Type</th><th>Pay</th><th>Weekly hours</th><th>Login</th><th></th></tr></thead>
+      <tbody>
+      {% for e in employees %}
+        <tr class="{{ 'inactive' if not e.is_active }}">
+          <td><a href="/employees/{{ e.id }}">{{ e.full_name }}</a><br><small class="muted">{{ e.title or '' }}</small></td>
+          <td>{{ e.department.name if e.department else '—' }}</td>
+          <td>{{ e.employment_type.value.replace('_', ' ') }}</td>
+          <td>{% if e.pay_type.value == 'hourly' %}{{ e.hourly_rate|money(e.currency) }}/h{% else %}{{ e.monthly_salary|money(e.currency) }}/month{% endif %}</td>
+          <td>{{ e.weekly_hours }}</td>
+          <td>{% if e.user %}<span class="badge">{{ e.user.role.value }}</span>{% else %}<span class="muted">none</span>{% endif %}</td>
+          <td>{% if e.is_active %}<form method="post" action="/employees/{{ e.id }}/deactivate" onsubmit="return confirm('Deactivate {{ e.full_name }}?')"><button class="btn btn-sm btn-ghost">Deactivate</button></form>{% else %}<span class="badge badge-muted">inactive</span>{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="muted">No employees yet. Add the first one on the right.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <aside class="stack">
+    <section class="card">
+      <h2>Add employee</h2>
+      <form method="post" action="/employees" class="stack">
+        <div class="row"><label>First name <input name="first_name" required></label><label>Last name <input name="last_name" required></label></div>
+        <label>Email <input type="email" name="email" required></label>
+        <div class="row">
+          <label>Department <select name="department_id"><option value="">—</option>{% for d in departments %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+          <label>Title <input name="title"></label>
+        </div>
+        <div class="row">
+          <label>Start date <input type="date" name="start_date" value="{{ today|d }}" required></label>
+          <label>Employment <select name="employment_type">{% for t in employment_types %}<option value="{{ t }}">{{ t.replace('_',' ') }}</option>{% endfor %}</select></label>
+        </div>
+        <div class="row">
+          <label>Pay type <select name="pay_type">{% for t in pay_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></label>
+          <label>Weekly hours <input name="weekly_hours" value="40"></label>
+        </div>
+        <div class="row">
+          <label>Monthly salary <input name="monthly_salary" placeholder="e.g. 38000"></label>
+          <label>Hourly rate <input name="hourly_rate" placeholder="e.g. 210"></label>
+        </div>
+        <div class="row">
+          <label>Login password <input name="login_password" placeholder="leave empty for no login"></label>
+          <label>Role <select name="role">{% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select></label>
+        </div>
+        <button class="btn btn-primary">Add employee</button>
+      </form>
+    </section>
+    <section class="card">
+      <h2>Departments</h2>
+      <ul class="list compact">{% for d in departments %}<li>{{ d.name }}{% if d.cost_center %} <span class="muted">({{ d.cost_center }})</span>{% endif %}</li>{% else %}<li class="muted">None yet</li>{% endfor %}</ul>
+      <form method="post" action="/departments" class="row">
+        <input name="name" placeholder="Department name" required>
+        <input name="cost_center" placeholder="Cost center">
+        <button class="btn">Add</button>
+      </form>
+    </section>
+  </aside>
+</div>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Automations</h1>
+  {% if current_user.has_role(Role.ADMIN) %}<a class="btn btn-primary btn-sm" href="/automations/new">New automation</a>{% endif %}
+</div>
+<section class="tiles">
+  <div class="tile accent"><span class="label">Hours saved, all time</span><span class="value">{{ stats.hours_saved_total }} h</span><span class="sub">{{ stats.minutes_saved_7d }} min in the last 7 days</span></div>
+  <div class="tile"><span class="label">Runs, last 7 days</span><span class="value">{{ stats.runs_7d }}</span><span class="sub">{{ stats.failed_7d }} failed</span></div>
+  <div class="tile"><span class="label">Rules enabled</span><span class="value">{{ stats.enabled_rules }} / {{ stats.total_rules }}</span></div>
+</section>
+<section class="card">
+  <table><thead><tr><th>Rule</th><th>Trigger</th><th>Actions</th><th>Runs</th><th>Last run</th><th>Next run</th><th>Saves</th><th></th></tr></thead><tbody>
+  {% for r in rules %}
+    <tr class="{{ 'inactive' if not r.enabled }}">
+      <td><a href="/automations/{{ r.id }}"><strong>{{ r.name }}</strong></a>{% if r.key %} <span class="badge badge-muted">built-in</span>{% endif %}<br><small class="muted">{{ r.description or '' }}</small></td>
+      <td><code>{{ describe_trigger(r) }}</code></td>
+      <td>{% for a in r.actions %}<code>{{ a.type }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      <td>{{ r.run_count }}</td>
+      <td>{{ r.last_run_at|dt }}</td>
+      <td>{{ r.next_run_at|dt if r.trigger_type.value == 'schedule' and r.enabled else '—' }}</td>
+      <td>{{ r.estimated_minutes_saved }} min</td>
+      <td class="row tight">
+        <form method="post" action="/automations/{{ r.id }}/run"><button class="btn btn-xs">Run now</button></form>
+        {% if current_user.has_role(Role.ADMIN) %}<form method="post" action="/automations/{{ r.id }}/toggle"><button class="btn btn-xs btn-ghost">{{ 'Disable' if r.enabled else 'Enable' }}</button></form>{% endif %}
+      </td>
+    </tr>
+  {% else %}<tr><td colspan="8" class="muted">No rules. Run <code>nexum seed</code> or create one.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+<section class="card">
+  <h2>Latest runs</h2>
+  <table><thead><tr><th>When</th><th>Rule</th><th>Trigger</th><th>Status</th><th>Result</th></tr></thead><tbody>
+  {% for run in runs %}
+    <tr><td>{{ run.started_at|dt }}</td><td><a href="/automations/{{ run.rule_id }}">{{ run.rule.name }}</a></td><td><small>{{ run.trigger_summary }}</small></td><td><span class="badge badge-{{ run.status.value }}">{{ run.status.value }}</span></td><td><small>{{ run.log[-1] if run.log else (run.error or '') }}</small></td></tr>
+  {% else %}<tr><td colspan="5" class="muted">No runs yet.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

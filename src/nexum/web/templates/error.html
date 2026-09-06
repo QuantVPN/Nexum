@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>{{ error.status_code }}</h1>
+  <p>{{ error }}</p>
+  <a class="btn" href="javascript:history.back()">Go back</a>
+</div>
+{% endblock %}
