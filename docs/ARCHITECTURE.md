@@ -14,27 +14,45 @@ src/nexum/
 ├── main.py              FastAPI app factory, middleware, exception handlers, lifespan
 ├── cli.py               `nexum` command line (typer)
 ├── models/              SQLAlchemy 2.0 typed models (one file per bounded area)
+├── migrations/          Alembic environment + versions (shipped in the package)
 ├── services/            Business logic; takes a Session, never commits, emits events
 │   ├── events.py        DomainEvent, emit(), commit_and_dispatch(), dispatcher registry
-│   ├── people.py        users, departments, employees, time off
-│   ├── scheduling.py    shifts, templates, conflicts, auto-assign, publish
-│   ├── time_tracking.py clock in/out, manual entries, approvals, missing entries
-│   ├── payroll.py       pay periods, payslip calculation, close/pay lifecycle
-│   ├── dashboard.py     aggregated numbers for admin and employee views
-│   ├── notifications.py in-app notifications (user, employee, role)
-│   ├── audit.py         audit log helper
-│   ├── security.py      scrypt password hashing
-│   └── calendar.py      week/month helpers (UTC, weeks start Monday)
+│   ├── company.py       company settings singleton, PayrollRules, first-run setup
+│   ├── calendar.py      day/week/period helpers in the company time zone
+│   ├── people.py        users, departments, employees, skills, availability, time off, GDPR
+│   ├── scheduling.py    shifts, templates, conflicts, auto-assign, publish, shift requests
+│   ├── time_tracking.py clock in/out, manual entries, approvals, paid-minutes rules
+│   ├── payroll.py       pay periods, paid intervals, premiums, payslips, exports
+│   ├── dashboard.py     admin/employee overviews, automation stats and report
+│   ├── notifications.py in-app notifications (+ e-mail mirror), audit.py, mailer.py
+│   ├── auth.py          sign-in with rate limiting, password change, reset tokens
+│   ├── security.py      scrypt password hashing, token hashing, password policy
+│   ├── ratelimit.py     sliding-window limiter for logins
+│   └── ical.py          per-employee calendar feed
 ├── automation/          The engine
-│   ├── engine.py        AutomationEngine: handle_event, tick, run_rule, background ticker
+│   ├── engine.py        AutomationEngine: handle_event, tick, run_rule (+ dry runs), ticker
 │   ├── schedule.py      next_run() for interval/hourly/daily/weekly/monthly triggers
 │   ├── conditions.py    safe condition language (no eval)
 │   ├── context.py       RunContext, ActionResult, event enrichment, message templating
 │   ├── actions.py       action registry + built-in actions
+│   ├── retry.py         retries with backoff for outbound calls
 │   └── recipes.py       built-in rules, upserted by key
 ├── api/                 JSON API under /api/v1 (routers per area, pydantic schemas, deps)
 └── web/                 Server-rendered UI (routes.py, templating.py, templates/, static/)
 ```
+
+## Company settings and time
+
+One `company_settings` row (see `services/company.py`) holds the company name, time zone,
+currency, payroll rules (overtime threshold and multiplier, premium windows, holidays,
+rounding, automatic breaks, vacation days, period type) and SMTP delivery. It is created
+from the `NEXUM_*` defaults on first use and edited on `/settings`.
+
+The database stores UTC. `services/calendar.py` interprets days, weeks, pay periods and
+template times in the company zone (`set_timezone` is called whenever the settings row is
+loaded or saved, on app start and on every engine tick). The web layer parses form input
+as company-local time and formats output the same way; naive datetimes sent to the API
+are treated as company-local too.
 
 ## Request lifecycle
 
@@ -49,6 +67,13 @@ src/nexum/
 5. Domain errors (`NexumError` subclasses) become JSON `{detail}` responses under `/api/`
    and an HTML error page (or a login redirect) elsewhere. Web POST handlers use
    `guarded()` which turns a domain error into a flash message and a redirect back.
+
+Two middlewares wrap every request: `RequestContextMiddleware` (request id, access log)
+and `SecurityHeadersMiddleware` (hardening headers plus a Content-Security-Policy; the
+API docs are exempt because Swagger UI loads from a CDN). Web forms carry a CSRF token
+bound to the session, verified by a router-level dependency; the session is rotated on
+login and carries the user's `session_salt`, so changing a password signs out every other
+device. Sign-in attempts are rate limited per client and address.
 
 ## Event flow
 
@@ -116,8 +141,22 @@ JSON-friendly values (ids, ISO dates, enum values) so they can be logged and mat
 | `notifications` | in-app inbox | `level`, `link`, `source` (dedupe key), `is_read` |
 | `audit_log` | who did what | `action`, `entity_type`, `entity_id`, `details` |
 
+| `company_settings` | single row of company-wide settings | time zone, currency, payroll rules (JSON), SMTP |
+| `skills`, `employee_skills` | skills on employees; templates/shifts may require one | |
+| `availability_rules` | recurring unavailable/preferred windows | `weekday`, `start_time`, `end_time`, `kind` |
+| `shift_requests` | claim / drop / transfer requests | `kind`, `status`, `target_employee_id`, `decision_note` |
+| `password_reset_tokens` | single-use expiring reset links | `token_hash`, `expires_at`, `used_at` |
+
 All datetimes are stored naive-UTC and returned aware-UTC by the `UTCDateTime` type.
 Money and hours use `FixedPoint` (scaled integers) so SQLite and PostgreSQL behave the same.
+
+## Migrations
+
+Schema changes ship as Alembic revisions in `nexum/migrations/versions`. `nexum db upgrade`
+applies them (the Docker image runs it on start), `nexum db check` fails when the models
+and the database differ (CI runs it on SQLite and PostgreSQL), and `nexum db revision -m`
+autogenerates a new file after a model change. `init_db()` (tests, `nexum init-db`) creates
+the tables from the models and stamps the head revision.
 
 ## Configuration
 
@@ -135,13 +174,15 @@ Settings come from environment variables with the `NEXUM_` prefix or a `.env` fi
 - API and web tests drive the HTTP surface with the FastAPI test client; templates use
   `StrictUndefined`, so a typo in a template fails a test instead of rendering blank.
 - CLI tests use typer's `CliRunner` against a temporary file database, including the demo seed.
+- Migration tests upgrade an empty database, compare it with the models and downgrade again.
+- Set `NEXUM_TEST_DATABASE_URL` to a PostgreSQL URL to run the whole suite against it.
 
 CI runs ruff, mypy (strict), pytest with a coverage floor, the seed, and a Docker build
 that must answer `/healthz`.
 
 ## Deployment
 
-- `Dockerfile` builds a slim image with `uv`; the container runs `nexum init-db` then uvicorn.
+- `Dockerfile` builds a slim image with `uv`; the container runs `nexum db upgrade` then uvicorn.
 - `docker-compose.yml` adds PostgreSQL 16; set `NEXUM_SECRET_KEY` before exposing it.
 - The automation ticker runs inside the web process. Run exactly one web replica until the
   ticker is moved to a dedicated worker (planned in M4, see `docs/PLAN.md`); with several

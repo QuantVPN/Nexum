@@ -24,6 +24,13 @@ jobs:
         run: uv run mypy
       - name: Test
         run: uv run pytest --cov=nexum --cov-report=xml --cov-fail-under=85
+      - name: Migrations apply cleanly and match the models
+        env:
+          NEXUM_DATABASE_URL: sqlite:///./ci-migrate.db
+        run: |
+          uv run nexum db upgrade
+          uv run nexum db check
+          uv run nexum db current
       - name: Smoke the demo seed + CLI
         env:
           NEXUM_DATABASE_URL: sqlite:///./ci-demo.db
@@ -32,6 +39,40 @@ jobs:
           uv run nexum seed
           uv run nexum automations list
           uv run nexum automations fire daily-cover
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nexum
+          POSTGRES_PASSWORD: nexum
+          POSTGRES_DB: nexum_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U nexum"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --all-extras --dev --python 3.12
+      - name: Test suite against PostgreSQL
+        env:
+          NEXUM_TEST_DATABASE_URL: postgresql+psycopg://nexum:nexum@localhost:5432/nexum_test
+        run: uv run pytest -q
+      - name: Migrations on PostgreSQL
+        env:
+          NEXUM_DATABASE_URL: postgresql+psycopg://nexum:nexum@localhost:5432/nexum_migrate
+        run: |
+          PGPASSWORD=nexum psql -h localhost -U nexum -d nexum_test -c "CREATE DATABASE nexum_migrate"
+          uv run nexum db upgrade
+          uv run nexum db check
 
   docker:
     runs-on: ubuntu-latest

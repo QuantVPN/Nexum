@@ -66,13 +66,18 @@ def session_factory() -> sessionmaker[Session]:
 
 
 def init_db(drop: bool = False) -> None:
-    """Create all tables. Alembic migrations are planned for M1 (see docs/PLAN.md)."""
+    """Create every table from the models and stamp the Alembic head.
+
+    Fresh installs and tests use this; upgrading an existing database is ``nexum db upgrade``.
+    """
     import nexum.models  # noqa: F401  (register models on Base.metadata)
+    from nexum.migrations import stamp
 
     engine = get_engine()
     if drop:
         Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    stamp(engine, "head")
 
 
 @contextmanager

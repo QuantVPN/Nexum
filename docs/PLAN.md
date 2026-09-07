@@ -12,21 +12,19 @@ issue-ready backlog at the end.
 
 ## 0. Where we are
 
-The repository held only a README and a `.gitignore` before this branch. The branch adds a
-working foundation ("M0") that you can run today:
+Version 0.2.0 (this branch) delivers the M0 foundation plus most of milestones M1 to M6.
+The table shows what exists today; the roadmap in section 4 lists what is still open.
 
 | Area | Status | Notes |
 |---|---|---|
-| Domain model | done | users/roles, departments, employees, shifts + templates, time entries, time off, pay periods/payslips, automation rules/runs, notifications, audit log |
-| Services | done | scheduling (templates, conflicts, auto-assign, publish), time tracking, payroll (weekly overtime, pro-rating, unpaid leave), dashboards |
-| Automation engine | done | schedule/event/manual triggers, safe condition language, 16 actions, run history, hours-saved accounting, 15 built-in recipes |
-| JSON API | done | `/api/v1`, session auth, RBAC (admin/manager/employee), OpenAPI at `/api/docs` |
-| Web UI | done | dashboard, employees, schedule grid, templates, approvals, payroll, automations, employee self-service, notifications |
-| CLI | done | `nexum init-db`, `seed`, `serve`, `create-admin`, `automations list/run-due/fire/install-recipes` |
-| Quality gates | done | ruff, mypy strict, pytest (unit, service, engine, API, web, CLI) at ~94% line coverage, GitHub Actions CI, Docker image + compose with Postgres |
-
-What is deliberately *not* there yet is listed in the roadmap (migrations, e-mail/Slack
-delivery, localised payroll rules, availability/swaps, SSO, and so on).
+| Domain model | done | users/roles, company settings, departments, employees with skills and availability, shifts + templates, shift requests, time entries, time off, pay periods/payslips, automation rules/runs, notifications, audit log, reset tokens |
+| Services | done | scheduling (templates, conflicts, availability, skills, auto-assign, publish, claims/drops/hand-overs), time tracking (breaks, rounding), payroll (weekly overtime, premiums, holidays, bi-weekly, vacation balance, exports), dashboards and reports |
+| Automation engine | done | schedule/event/manual triggers in company time, safe condition language, 23 actions, retries, dry runs, run history, hours-saved accounting, 29 built-in recipes |
+| Delivery | done | in-app, e-mail (SMTP, per-user opt-out), Slack/Teams incoming webhooks, generic webhook |
+| JSON API | done | `/api/v1`, session auth, RBAC, OpenAPI at `/api/docs` |
+| Web UI | done | setup wizard, dashboard, employees (edit, export, anonymise), schedule grid, templates, approvals (time off, timesheets, shift requests), payroll with payslips and CSV, automations with editor/report, settings, employee self-service (shifts, availability, time, pay, requests) |
+| Operations | done | company time zone, migrations (`nexum db`), CSRF, security headers, rate-limited login, password reset, request ids, `/healthz` |
+| Quality gates | done | ruff, mypy strict, ~140 tests at ~95% coverage on SQLite and PostgreSQL, CI (lint, types, tests, migrations check, seed smoke, Docker build, PostgreSQL job) |
 
 Try it:
 
@@ -36,8 +34,6 @@ uv run nexum seed          # demo company, logins printed at the end
 uv run nexum serve         # http://127.0.0.1:8000
 uv run pytest
 ```
-
----
 
 ## 1. Product definition
 
@@ -141,14 +137,14 @@ and a pilot customer contact. Each milestone ends with a demo and a tagged relea
 
 | # | Milestone | Weeks | Exit criteria |
 |---|---|---|---|
-| M0 | Foundation | done | this branch: green CI, seedable demo, all modules present |
-| M1 | Operate safely | 2 | Alembic migrations, Postgres in CI, backup/restore runbook, company time zone, CSV employee import, `v0.2.0` |
-| M2 | Scheduling v1 | 3 | availability, swaps/claims with approval, skills/roles constraint, iCal feed, printable week, `v0.3.0` |
-| M3 | Time & payroll v1 | 3 | premiums, rounding, bi-weekly periods, vacation accrual, payslip PDF, bookkeeping export, `v0.4.0` |
-| M4 | Automation v1 | 3 | e-mail + webhook channels, rule builder UI, retries + dry run, scoping, effectiveness report, `v0.5.0` |
+| M0 | Foundation | done | v0.1.0: green CI, seedable demo, all modules present |
+| M1 | Operate safely | done (0.2.0) | migrations, Postgres in CI, company time zone; still open: backup runbook, CSV employee import |
+| M2 | Scheduling v1 | done (0.2.0) | availability, claims/drops/hand-overs, skills, iCal feed, print view; still open: coverage view |
+| M3 | Time & payroll v1 | mostly done (0.2.0) | premiums, holidays, rounding, bi-weekly, vacation balance, printable payslips, CSV; still open: payslip PDF/e-mail, SIE/Fortnox exports, reconciliation view |
+| M4 | Automation v1 | mostly done (0.2.0) | e-mail + chat + webhook, structured trigger editor, retries, dry runs, report, 14 new recipes; still open: condition/action builder without JSON, digest mode, per-department scoping |
 | M5 | Insight | 2 | trends, budgets, coverage heatmap, exports, `v0.6.0` |
-| M6 | Security & compliance | 2 | password reset, OIDC, CSRF, rate limits, GDPR export/delete, retention, `v0.9.0` |
-| M7 | Launch | 1–2 | onboarding wizard, docs site, monitoring, load test, pilot sign-off, `v1.0.0` |
+| M6 | Security & compliance | mostly done (0.2.0) | password reset, CSRF, rate limits, security headers, GDPR export/anonymise; still open: OIDC, retention job, external review |
+| M7 | Launch | 1–2 | setup wizard done; still open: docs site, monitoring, load test, pilot sign-off, `v1.0.0` |
 
 ### M1 · Operate safely (2 weeks)
 
@@ -235,29 +231,29 @@ has an acceptance criterion so it can be copied straight into a GitHub issue.
 
 **P0**
 
-1. Alembic migrations with initial revision; `nexum db upgrade`. *AC: fresh Postgres + upgrade = same schema as models; CI runs it.*
-2. PostgreSQL CI job. *AC: full test suite passes on Postgres 16 service container.*
-3. Company settings model replacing env-based payroll defaults. *AC: overtime threshold/multiplier/currency/time zone editable by admin; payroll tests read them.*
-4. Company time zone rendering and parsing in the UI. *AC: a shift entered as 08:00 Stockholm is stored as 06:00 UTC in summer and shown as 08:00.*
-5. CSRF tokens on web forms. *AC: cross-origin POST is rejected; existing web tests pass with tokens.*
+1. ~~Alembic migrations with initial revision; `nexum db upgrade`.~~ Done in 0.2.0 (`nexum db`, CI check on SQLite and PostgreSQL).
+2. ~~PostgreSQL CI job.~~ Done in 0.2.0.
+3. ~~Company settings model replacing env-based payroll defaults.~~ Done in 0.2.0 (`/settings`).
+4. ~~Company time zone rendering and parsing in the UI.~~ Done in 0.2.0.
+5. ~~CSRF tokens on web forms.~~ Done in 0.2.0.
 
 **P1**
 
-6. Employee availability + preference scoring in auto-assign.
-7. Shift swap and claim requests with approval and events.
-8. Skills on templates and employees; candidate ranking uses them.
-9. Premium (unsocial hours) rules and holiday calendar in payroll.
-10. Break/rounding rules; vacation accrual and balance.
-11. Payslip PDF and e-mail delivery; SMTP channel with per-user preferences.
+6. ~~Employee availability + preference scoring in auto-assign.~~ Done in 0.2.0.
+7. ~~Shift swap and claim requests with approval and events.~~ Done in 0.2.0.
+8. ~~Skills on templates and employees; candidate ranking uses them.~~ Done in 0.2.0.
+9. ~~Premium (unsocial hours) rules and holiday calendar in payroll.~~ Done in 0.2.0.
+10. ~~Break/rounding rules; vacation accrual and balance.~~ Done in 0.2.0.
+11. Payslip PDF and e-mail delivery (the SMTP channel with per-user preferences is done; printable payslip pages exist).
 12. Bookkeeping exports (CSV, SIE4).
-13. Rule builder UI with dry run; retries and dead-letter for actions.
-14. Slack/Teams incoming-webhook channels; digest mode.
-15. Password reset and OIDC login; login rate limiting.
-16. GDPR export/erase; retention job as an automation recipe.
+13. Condition/action builder without JSON (structured trigger editor, dry runs and retries are done).
+14. Digest mode (incoming-webhook channel is done).
+15. ~~Password reset and OIDC login; login rate limiting.~~ Done in 0.2.0 (OIDC and the docs site remain).
+16. Retention job as an automation recipe (GDPR export/erase is done).
 17. CSV import/export for employees, departments, shifts.
-18. iCal feed and printable schedule.
+18. ~~iCal feed and printable schedule.~~ Done in 0.2.0.
 19. Dashboard trends (labour cost vs budget, overtime, absence).
-20. Onboarding wizard and user/admin docs site.
+20. ~~Onboarding wizard and user/admin docs site.~~ Done in 0.2.0 (OIDC and the docs site remain).
 
 **P2**
 
@@ -308,8 +304,13 @@ has an acceptance criterion so it can be copied straight into a GitHub issue.
 
 ## 10. Next two weeks (concrete)
 
-1. Merge this branch as the M0 baseline; tag `v0.1.0`.
-2. Open issues 1–5 from the backlog; start with Alembic (issue 1) and the Postgres CI job (issue 2) since everything else builds on them.
-3. Add the company settings model (issue 3) and move payroll defaults into it.
-4. Implement company time zone (issue 4) in the templating filters and form parsing; migrate the seed.
-5. Decide the pilot customer and collect their real templates and pay rules; turn them into the M3 acceptance tests.
+1. Merge this branch and tag `v0.2.0`; deploy the compose stack for an internal trial.
+2. Pilot: load the pilot company's real templates, premium windows and holidays through
+   `/settings` and `/templates`; run one payroll period in parallel with the current
+   process and reconcile the CSV export line by line.
+3. Insight (M5): labour cost per department and month, overtime and absence trends,
+   coverage heatmap; scheduled report e-mail via the automation engine.
+4. Close the M3/M4 gaps that block bookkeeping: payslip PDF by e-mail, SIE export,
+   and the condition/action builder so admins never touch JSON.
+5. Launch prep (M7): backup/restore runbook, OpenTelemetry metrics, load test with
+   500 employees, user guide, then the pilot sign-off for `v1.0.0`.

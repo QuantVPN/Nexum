@@ -21,4 +21,4 @@ USER nexum
 VOLUME ["/data"]
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz').status == 200 else 1)"
-CMD ["sh", "-c", "nexum init-db && uvicorn nexum.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "nexum db upgrade && uvicorn nexum.main:app --host 0.0.0.0 --port 8000"]

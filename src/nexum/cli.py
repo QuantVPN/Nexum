@@ -17,6 +17,8 @@ from nexum.config import get_settings
 app = typer.Typer(help="Nexum: company overview + automation.", no_args_is_help=True)
 automations_app = typer.Typer(help="Inspect and run automation rules.", no_args_is_help=True)
 app.add_typer(automations_app, name="automations")
+db_app = typer.Typer(help="Database schema migrations (Alembic).", no_args_is_help=True)
+app.add_typer(db_app, name="db")
 
 
 def _version(value: bool) -> None:
@@ -452,6 +454,80 @@ def automations_install(
     with session_scope() as session:
         installed = install_recipes(session, reset=reset)
     typer.echo(f"{'Reset' if reset else 'Installed'} {len(installed)} recipe(s)")
+
+
+@db_app.command("upgrade")
+def db_upgrade(
+    revision: Annotated[str, typer.Argument(help="Target revision (default: head)")] = "head",
+) -> None:
+    """Apply pending migrations (safe to run on every deploy)."""
+    from nexum import migrations
+    from nexum.db import get_engine
+
+    engine = get_engine()
+    before = migrations.current_revision(engine)
+    migrations.upgrade(engine, revision)
+    after = migrations.current_revision(engine)
+    typer.echo(f"Database at {after} (was {before or 'empty'})")
+
+
+@db_app.command("downgrade")
+def db_downgrade(
+    revision: Annotated[str, typer.Argument(help="Target revision or 'base'")],
+) -> None:
+    """Revert migrations down to a revision (destructive for the reverted tables)."""
+    from nexum import migrations
+    from nexum.db import get_engine
+
+    if not typer.confirm(
+        f"Downgrade to {revision}? Data in reverted tables is lost.", default=False
+    ):
+        raise typer.Abort()
+    migrations.downgrade(get_engine(), revision)
+    typer.echo(f"Database at {migrations.current_revision(get_engine()) or 'base'}")
+
+
+@db_app.command("current")
+def db_current() -> None:
+    """Show the current and the latest available revision."""
+    from nexum import migrations
+    from nexum.db import get_engine
+
+    current = migrations.current_revision(get_engine())
+    head = migrations.head_revision()
+    state = "up to date" if current == head else "behind, run `nexum db upgrade`"
+    typer.echo(f"current={current or 'none'} head={head} ({state})")
+
+
+@db_app.command("check")
+def db_check() -> None:
+    """Fail when the models differ from the database (used in CI)."""
+    from nexum import migrations
+    from nexum.db import get_engine
+
+    diffs = migrations.pending_changes(get_engine())
+    if diffs:
+        typer.echo("Models and database differ:", err=True)
+        for diff in diffs:
+            typer.echo(f"  {diff}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Models and database are in sync")
+
+
+@db_app.command("revision")
+def db_revision(
+    message: Annotated[str, typer.Option("--message", "-m", help="Short description")],
+    autogenerate: Annotated[bool, typer.Option(help="Diff the models against the database")] = True,
+) -> None:
+    """Create a new migration file from model changes."""
+    from alembic import command
+
+    from nexum.migrations import alembic_config
+
+    command.revision(
+        alembic_config(get_settings().database_url), message=message, autogenerate=autogenerate
+    )
+    typer.echo("Migration written to nexum/migrations/versions")
 
 
 if __name__ == "__main__":  # pragma: no cover
