@@ -276,3 +276,42 @@ def rules_from(row: CompanySettings) -> PayrollRules:
         pay_period_type=row.pay_period_type,
         biweekly_anchor=row.biweekly_anchor,
     )
+
+
+def needs_setup(session: Session) -> bool:
+    """True until the first user exists (drives the /setup wizard)."""
+    from sqlalchemy import select
+
+    return session.scalar(select(User.id).limit(1)) is None
+
+
+def setup_company(
+    session: Session,
+    *,
+    name: str,
+    timezone: str,
+    currency: str,
+    admin_email: str,
+    admin_name: str,
+    admin_password: str,
+) -> User:
+    """First-run wizard: settings, the first admin and the built-in automations."""
+    from nexum.automation.recipes import install_recipes
+    from nexum.models import Role
+    from nexum.services.people import create_user
+    from nexum.services.security import validate_password
+
+    if not needs_setup(session):
+        raise ValidationError("Setup has already been completed")
+    validate_password(admin_password)
+    update_company(session, name=name.strip() or "My company", timezone=timezone, currency=currency)
+    admin = create_user(
+        session,
+        email=admin_email,
+        full_name=admin_name.strip() or "Admin",
+        password=admin_password,
+        role=Role.ADMIN,
+    )
+    install_recipes(session)
+    audit.record(session, "company.setup_completed", "company_settings", SINGLETON_ID, actor=admin)
+    return admin

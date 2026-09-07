@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 from fastapi import APIRouter, Query
 
-from nexum.api.deps import CurrentUser, DbSession, ManagerUser
+from nexum.api.deps import AdminUser, CurrentUser, DbSession, ManagerUser
 from nexum.api.schemas import (
     AvailabilityIn,
     AvailabilityOut,
@@ -15,7 +16,7 @@ from nexum.api.schemas import (
 )
 from nexum.errors import PermissionDeniedError
 from nexum.models import Employee, Role, User
-from nexum.services import people
+from nexum.services import auth, people
 from nexum.services.events import commit_and_dispatch
 
 router = APIRouter(prefix="/employees", tags=["employees"])
@@ -103,6 +104,32 @@ def put_availability(
     rules = people.replace_availability(db, employee, [r.model_dump() for r in payload])
     commit_and_dispatch(db)
     return [AvailabilityOut.model_validate(r) for r in rules]
+
+
+@router.post("/{employee_id}/reset-link")
+def reset_link(employee_id: int, db: DbSession, user: AdminUser) -> dict[str, Any]:
+    employee = people.get_employee(db, employee_id)
+    if employee.user is None or not employee.user.is_active:
+        raise PermissionDeniedError("This employee has no active login")
+    raw = auth.create_reset_token(db, employee.user, created_by=user)
+    db.commit()
+    return {
+        "url": f"/reset/{raw}",
+        "expires_in_hours": int(auth.RESET_TOKEN_TTL.total_seconds() // 3600),
+    }
+
+
+@router.get("/{employee_id}/export")
+def export_employee(employee_id: int, db: DbSession, _: AdminUser) -> dict[str, Any]:
+    return people.export_employee(db, people.get_employee(db, employee_id))
+
+
+@router.post("/{employee_id}/anonymize", response_model=EmployeeOut)
+def anonymize(employee_id: int, db: DbSession, user: AdminUser) -> EmployeeOut:
+    employee = people.get_employee(db, employee_id)
+    people.anonymize_employee(db, employee, actor=user)
+    commit_and_dispatch(db)
+    return EmployeeOut.model_validate(employee)
 
 
 @router.post("/{employee_id}/deactivate", response_model=EmployeeOut)

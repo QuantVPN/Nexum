@@ -13,6 +13,7 @@ from nexum.errors import AuthenticationError, PermissionDeniedError
 from nexum.models import Employee, Role, User
 
 SESSION_USER_KEY = "user_id"
+SESSION_SALT_KEY = "salt"
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -22,8 +23,13 @@ def load_session_user(request: Request, db: Session) -> User | None:
     if not isinstance(user_id, int):
         return None
     user = db.get(User, user_id)
-    if user is None or not user.is_active:
+    if (
+        user is None
+        or not user.is_active
+        or request.session.get(SESSION_SALT_KEY) != user.session_salt
+    ):
         request.session.pop(SESSION_USER_KEY, None)
+        request.session.pop(SESSION_SALT_KEY, None)
         return None
     return user
 
@@ -68,6 +74,7 @@ CurrentEmployee = Annotated[Employee, Depends(current_employee)]
 def login(request: Request, user: User) -> None:
     request.session.clear()  # new session id/CSRF token after authentication
     request.session[SESSION_USER_KEY] = user.id
+    request.session[SESSION_SALT_KEY] = user.session_salt
 
 
 def logout(request: Request) -> None:

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="login-box">
+  <h1>Forgot your password?</h1>
+  {% if email_ready %}
+  <p class="muted">Enter your email and we will send a link to choose a new password.</p>
+  <form method="post" action="/forgot" class="stack">{{ csrf_input }}
+    <label>Email <input type="email" name="email" required autofocus></label>
+    <button class="btn btn-primary">Send reset link</button>
+  </form>
+  {% else %}
+  <p>E-mail is not set up for this installation. Ask an administrator: they can generate a reset link for you from your employee page.</p>
+  {% endif %}
+  <p><a href="/login">Back to sign in</a></p>
+</div>
+{% endblock %}

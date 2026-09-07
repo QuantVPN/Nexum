@@ -43,3 +43,29 @@ def verify_password(password: str, encoded: str) -> bool:
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(actual, expected)
+
+
+def generate_token() -> tuple[str, str]:
+    """A random URL-safe token and the SHA-256 hex digest that is stored."""
+    import secrets
+
+    raw = secrets.token_urlsafe(32)
+    return raw, hash_token(raw)
+
+
+def hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+MIN_PASSWORD_LENGTH = 8
+
+
+def validate_password(password: str) -> None:
+    from nexum.errors import ValidationError
+
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ValidationError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    if password.strip() != password:
+        raise ValidationError("Password cannot start or end with spaces")
+    if password.lower() in {"password", "password1", "12345678", "qwerty12"}:
+        raise ValidationError("That password is too common")

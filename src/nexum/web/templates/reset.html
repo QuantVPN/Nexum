@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="login-box">
+  <h1>Choose a new password</h1>
+  <form method="post" action="/reset/{{ token }}" class="stack">{{ csrf_input }}
+    <label>New password <input type="password" name="password" minlength="8" required autofocus></label>
+    <label>Repeat password <input type="password" name="password_confirm" minlength="8" required></label>
+    <button class="btn btn-primary">Save password</button>
+  </form>
+</div>
+{% endblock %}

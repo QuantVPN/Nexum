@@ -25,3 +25,7 @@ class PermissionDeniedError(NexumError):
 
 class AuthenticationError(NexumError):
     status_code = 401
+
+
+class TooManyRequestsError(NexumError):
+    status_code = 429

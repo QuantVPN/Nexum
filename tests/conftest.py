@@ -29,6 +29,7 @@ from nexum.services import company as company_service
 from nexum.services import mailer, people, scheduling
 from nexum.services.calendar import set_timezone
 from nexum.services.events import clear_dispatchers, commit_and_dispatch
+from nexum.services.ratelimit import login_limiter
 
 MONDAY = date(2026, 9, 7)  # a Monday
 NOW = datetime(2026, 9, 8, 10, 0, tzinfo=UTC)  # Tuesday 10:00 UTC
@@ -56,6 +57,7 @@ def fresh_db() -> Iterator[None]:
     set_engine(None)
     set_timezone("UTC")
     mailer.set_transport(None)
+    login_limiter.clear()
     yield
     clear_dispatchers()
     set_engine(None)
@@ -184,14 +186,14 @@ def csrf_token(client: TestClient, refresh: bool = False) -> str:
     (re-reading a page would consume flash messages the test may want to assert on)."""
     if not refresh and id(client) in _csrf_cache:
         return _csrf_cache[id(client)]
-    for url in ("/notifications", "/login"):
+    for url in ("/notifications", "/login", "/setup"):
         response = client.get(url)
         if response.status_code == 200:
             match = CSRF_RE.search(response.text)
             if match:
                 _csrf_cache[id(client)] = match.group(1)
                 return match.group(1)
-    raise AssertionError("no CSRF token found on /notifications or /login")
+    raise AssertionError("no CSRF token found on /notifications, /login or /setup")
 
 
 def post(client: TestClient, url: str, data: dict[str, Any] | None = None, **kwargs: Any) -> Any:

@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head"><h1>{{ employee.full_name }}</h1><div class="row"><a class="btn btn-sm btn-primary" href="/employees/{{ employee.id }}/edit">Edit</a><a class="btn btn-sm" href="/employees">All employees</a></div></div>
+{% if current_user.has_role(Role.ADMIN) %}
+<section class="card row wrap">
+  {% if employee.user and employee.user.is_active %}<form method="post" action="/employees/{{ employee.id }}/reset-link">{{ csrf_input }}<button class="btn btn-sm">Generate password reset link</button></form>{% endif %}
+  <a class="btn btn-sm" href="/employees/{{ employee.id }}/export.json">Export personal data (JSON)</a>
+  <form method="post" action="/employees/{{ employee.id }}/anonymize" data-confirm="Erase this person's personal data? This cannot be undone.">{{ csrf_input }}<button class="btn btn-sm btn-ghost">Anonymise (GDPR erase)</button></form>
+</section>
+{% endif %}
 <div class="columns">
   <section class="card">
     <h2>Profile</h2>

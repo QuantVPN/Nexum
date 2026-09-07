@@ -477,3 +477,168 @@ def vacation_balance(
         "taken": taken,
         "remaining": (entitlement - taken).quantize(quant),
     }
+
+
+# --- data protection ----------------------------------------------------------------------------
+
+
+def export_employee(session: Session, employee: Employee) -> dict[str, Any]:
+    """Everything stored about one employee, JSON-friendly (GDPR access request)."""
+    from nexum.models import Notification, ShiftRequest
+
+    def iso(value: Any) -> Any:
+        return value.isoformat() if hasattr(value, "isoformat") else value
+
+    user = employee.user
+    notifications = (
+        list(session.scalars(select(Notification).where(Notification.user_id == user.id)))
+        if user
+        else []
+    )
+    requests = list(
+        session.scalars(select(ShiftRequest).where(ShiftRequest.employee_id == employee.id))
+    )
+    return {
+        "exported_at": iso(utcnow()),
+        "employee": {
+            "id": employee.id,
+            "first_name": employee.first_name,
+            "last_name": employee.last_name,
+            "email": employee.email,
+            "title": employee.title,
+            "department": employee.department.name if employee.department else None,
+            "employment_type": employee.employment_type.value,
+            "pay_type": employee.pay_type.value,
+            "monthly_salary": str(employee.monthly_salary),
+            "hourly_rate": str(employee.hourly_rate),
+            "weekly_hours": str(employee.weekly_hours),
+            "currency": employee.currency,
+            "start_date": iso(employee.start_date),
+            "end_date": iso(employee.end_date),
+            "is_active": employee.is_active,
+            "skills": employee.skill_names,
+        },
+        "login": (
+            {
+                "email": user.email,
+                "role": user.role.value,
+                "is_active": user.is_active,
+                "last_login_at": iso(user.last_login_at),
+                "email_notifications": user.email_notifications,
+            }
+            if user
+            else None
+        ),
+        "availability": [
+            {
+                "weekday": r.weekday,
+                "start_time": iso(r.start_time),
+                "end_time": iso(r.end_time),
+                "kind": r.kind.value,
+                "note": r.note,
+            }
+            for r in employee.availability
+        ],
+        "shifts": [
+            {
+                "id": s.id,
+                "starts_at": iso(s.starts_at),
+                "ends_at": iso(s.ends_at),
+                "department": s.department.name,
+                "status": s.status.value,
+                "role_label": s.role_label,
+            }
+            for s in employee.shifts
+        ],
+        "time_entries": [
+            {
+                "id": e.id,
+                "clock_in": iso(e.clock_in),
+                "clock_out": iso(e.clock_out),
+                "break_minutes": e.break_minutes,
+                "status": e.status.value,
+                "note": e.note,
+            }
+            for e in employee.time_entries
+        ],
+        "time_off": [
+            {
+                "id": r.id,
+                "kind": r.kind.value,
+                "start_date": iso(r.start_date),
+                "end_date": iso(r.end_date),
+                "status": r.status.value,
+                "reason": r.reason,
+            }
+            for r in employee.time_off_requests
+        ],
+        "shift_requests": [
+            {
+                "id": r.id,
+                "kind": r.kind.value,
+                "status": r.status.value,
+                "shift_id": r.shift_id,
+                "note": r.note,
+                "created_at": iso(r.created_at),
+            }
+            for r in requests
+        ],
+        "payslips": [
+            {
+                "period": p.pay_period.label,
+                "regular_hours": str(p.regular_hours),
+                "overtime_hours": str(p.overtime_hours),
+                "premium_hours": str(p.premium_hours),
+                "gross_amount": str(p.gross_amount),
+                "currency": p.currency,
+            }
+            for p in employee.payslips
+        ],
+        "notifications": [
+            {"title": n.title, "created_at": iso(n.created_at), "is_read": n.is_read}
+            for n in notifications
+        ],
+    }
+
+
+def anonymize_employee(
+    session: Session, employee: Employee, *, actor: User | None = None
+) -> Employee:
+    """Erase personal data while keeping the aggregate records payroll and history need."""
+    from nexum.models import Notification, ShiftRequest
+    from nexum.models.identity import new_session_salt
+    from nexum.models.people import new_calendar_token
+    from nexum.services.security import hash_password
+
+    if employee.is_active:
+        deactivate_employee(session, employee, actor=actor)
+    marker = f"anonymized-{employee.id}"
+    employee.first_name = "Former"
+    employee.last_name = f"Employee {employee.id}"
+    employee.email = f"{marker}@example.invalid"
+    employee.title = None
+    employee.calendar_token = new_calendar_token()
+    employee.skills = []
+    for rule in list(employee.availability):
+        session.delete(rule)
+    for entry in employee.time_entries:
+        entry.note = None
+    for request in employee.time_off_requests:
+        request.reason = None
+    for shift_request in session.scalars(
+        select(ShiftRequest).where(ShiftRequest.employee_id == employee.id)
+    ):
+        shift_request.note = None
+    user = employee.user
+    if user is not None:
+        user.email = f"{marker}@example.invalid"
+        user.full_name = f"Former employee {employee.id}"
+        user.is_active = False
+        user.password_hash = hash_password(new_session_salt() + new_session_salt())
+        user.session_salt = new_session_salt()
+        user.email_notifications = False
+        for note in session.scalars(select(Notification).where(Notification.user_id == user.id)):
+            session.delete(note)
+    session.flush()
+    audit.record(session, "employee.anonymized", "employee", employee.id, actor=actor)
+    return employee

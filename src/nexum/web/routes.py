@@ -25,6 +25,7 @@ from nexum.errors import (
     NexumError,
     NotFoundError,
     PermissionDeniedError,
+    TooManyRequestsError,
     ValidationError,
 )
 from nexum.models import (
@@ -51,6 +52,7 @@ from nexum.models import (
 from nexum.models.types import utcnow
 from nexum.services import (
     audit,
+    auth,
     company,
     dashboard,
     ical,
@@ -70,7 +72,6 @@ from nexum.services.calendar import (
     week_window,
 )
 from nexum.services.events import EVENT_NAMES, commit_and_dispatch
-from nexum.services.security import verify_password
 from nexum.web.templating import CSRF_KEY, flash, render
 
 
@@ -190,17 +191,26 @@ def home_for(user: User) -> str:
 # --- auth -----------------------------------------------------------------------------------
 
 
+def client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
 @web_router.get("/", response_class=HTMLResponse)
-def index(user: OptionalUser) -> Response:
+def index(db: DbSession, user: OptionalUser) -> Response:
     if user is None:
-        return redirect("/login")
+        return redirect("/setup" if company.needs_setup(db) else "/login")
     return redirect(home_for(user))
 
 
 @web_router.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, user: OptionalUser) -> Response:
+def login_page(request: Request, db: DbSession, user: OptionalUser) -> Response:
     if user is not None:
         return redirect(home_for(user))
+    if company.needs_setup(db):
+        return redirect("/setup")
     return render(request, "login.html", title="Sign in", next=request.query_params.get("next", ""))
 
 
@@ -208,15 +218,166 @@ def login_page(request: Request, user: OptionalUser) -> Response:
 def login_submit(
     request: Request, db: DbSession, email: FormStr, password: FormStr, next: FormOptStr = None
 ) -> Response:
-    user = people.get_user_by_email(db, email)
-    if user is None or not user.is_active or not verify_password(password, user.password_hash):
-        flash(request, "Invalid email or password", "error")
+    try:
+        user = auth.authenticate(db, email, password, client_ip=client_ip(request))
+    except (AuthenticationError, TooManyRequestsError) as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
         return redirect("/login")
-    user.last_login_at = utcnow()
     db.commit()
     deps.login(request, user)
     target = next if next and next.startswith("/") and not next.startswith("//") else home_for(user)
     return redirect(target)
+
+
+# --- first-run setup -------------------------------------------------------------------------
+
+
+@web_router.get("/setup", response_class=HTMLResponse)
+def setup_page(request: Request, db: DbSession) -> Response:
+    if not company.needs_setup(db):
+        return redirect("/login")
+    return render(
+        request,
+        "setup.html",
+        title="Set up Nexum",
+        timezones=COMMON_TIMEZONES,
+        form={
+            "name": "",
+            "timezone": "UTC",
+            "currency": "SEK",
+            "admin_name": "",
+            "admin_email": "",
+        },
+    )
+
+
+@web_router.post("/setup")
+def setup_submit(
+    request: Request,
+    db: DbSession,
+    name: FormStr,
+    timezone: FormStr,
+    currency: FormStr,
+    admin_name: FormStr,
+    admin_email: FormStr,
+    password: FormStr,
+    password_confirm: FormStr,
+) -> Response:
+    if not company.needs_setup(db):
+        raise PermissionDeniedError("Setup has already been completed")
+    form = {
+        "name": name,
+        "timezone": timezone,
+        "currency": currency,
+        "admin_name": admin_name,
+        "admin_email": admin_email,
+    }
+    try:
+        if password != password_confirm:
+            raise ValidationError("The passwords do not match")
+        admin = company.setup_company(
+            db,
+            name=name,
+            timezone=timezone,
+            currency=currency,
+            admin_email=admin_email,
+            admin_name=admin_name,
+            admin_password=password,
+        )
+        db.commit()
+    except NexumError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+        return render(
+            request,
+            "setup.html",
+            title="Set up Nexum",
+            timezones=COMMON_TIMEZONES,
+            form=form,
+            status_code=422,
+        )
+    deps.login(request, admin)
+    flash(request, f"Welcome to {name}! Add departments and employees to get started.")
+    return redirect("/employees")
+
+
+# --- passwords -------------------------------------------------------------------------------
+
+
+@web_router.get("/forgot", response_class=HTMLResponse)
+def forgot_page(request: Request, db: DbSession) -> Response:
+    email_ready = company.get_company(db).email_configured
+    db.commit()
+    return render(request, "forgot.html", title="Forgot password", email_ready=email_ready)
+
+
+@web_router.post("/forgot")
+def forgot_submit(request: Request, db: DbSession, email: FormStr) -> Response:
+    auth.request_reset(db, email, reset_url_base=str(request.base_url))
+    commit_and_dispatch(db)
+    flash(request, "If that address has a login, a reset link is on its way.")
+    return redirect("/login")
+
+
+@web_router.get("/reset/{token}", response_class=HTMLResponse)
+def reset_page(request: Request, db: DbSession, token: str) -> Response:
+    if auth.find_valid_token(db, token) is None:
+        return render(
+            request,
+            "error.html",
+            title="Reset link expired",
+            status_code=410,
+            error=AuthenticationError("This reset link is invalid or has expired."),
+        )
+    return render(request, "reset.html", title="Choose a new password", token=token)
+
+
+@web_router.post("/reset/{token}")
+def reset_submit(
+    request: Request, db: DbSession, token: str, password: FormStr, password_confirm: FormStr
+) -> Response:
+    if password != password_confirm:
+        flash(request, "The passwords do not match", "error")
+        return redirect(f"/reset/{token}")
+    try:
+        auth.reset_password(db, token, password)
+        db.commit()
+    except NexumError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+        return redirect(f"/reset/{token}")
+    flash(request, "Password updated. Sign in with your new password.")
+    return redirect("/login")
+
+
+@web_router.get("/me/password", response_class=HTMLResponse)
+def password_page(request: Request, db: DbSession, user: CurrentUser) -> Response:
+    return render(request, "password.html", db=db, user=user, title="Change password")
+
+
+@web_router.post("/me/password")
+def password_submit(
+    request: Request,
+    db: DbSession,
+    user: CurrentUser,
+    current_password: FormStr,
+    new_password: FormStr,
+    new_password_confirm: FormStr,
+) -> Response:
+    if new_password != new_password_confirm:
+        flash(request, "The new passwords do not match", "error")
+        return redirect("/me/password")
+    try:
+        auth.change_password(db, user, current_password, new_password)
+        db.commit()
+    except NexumError as exc:
+        db.rollback()
+        flash(request, str(exc), "error")
+        return redirect("/me/password")
+    deps.login(request, user)
+    flash(request, "Password changed. Other devices have been signed out.")
+    return redirect(home_for(user))
 
 
 @web_router.post("/logout")
@@ -408,6 +569,46 @@ def employee_update(
             weekly_hours=parse_decimal(weekly_hours, "Weekly hours", "40"),
         )
         return "Employee updated"
+
+    return guarded(request, db, f"/employees/{employee_id}", work)
+
+
+@web_router.post("/employees/{employee_id}/reset-link")
+def employee_reset_link(
+    request: Request, db: DbSession, user: AdminUser, employee_id: int
+) -> Response:
+    employee = people.get_employee(db, employee_id)
+    if employee.user is None or not employee.user.is_active:
+        flash(request, "This employee has no active login", "error")
+        return redirect(f"/employees/{employee_id}")
+    raw = auth.create_reset_token(db, employee.user, created_by=user)
+    db.commit()
+    link = f"{str(request.base_url).rstrip('/')}/reset/{raw}"
+    flash(request, f"Reset link (valid 2 hours, shown once): {link}")
+    return redirect(f"/employees/{employee_id}")
+
+
+@web_router.get("/employees/{employee_id}/export.json")
+def employee_export(db: DbSession, user: AdminUser, employee_id: int) -> Response:
+    from fastapi.responses import JSONResponse
+
+    employee = people.get_employee(db, employee_id)
+    audit.record(db, "employee.exported", "employee", employee.id, actor=user)
+    db.commit()
+    return JSONResponse(
+        people.export_employee(db, employee),
+        headers={"Content-Disposition": f'attachment; filename="employee-{employee.id}.json"'},
+    )
+
+
+@web_router.post("/employees/{employee_id}/anonymize")
+def employee_anonymize(
+    request: Request, db: DbSession, user: AdminUser, employee_id: int
+) -> Response:
+    def work() -> str:
+        employee = people.get_employee(db, employee_id)
+        people.anonymize_employee(db, employee, actor=user)
+        return "Personal data erased; payroll history kept in anonymised form"
 
     return guarded(request, db, f"/employees/{employee_id}", work)
 

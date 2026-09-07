@@ -26,7 +26,7 @@
   </nav>
   <div class="user">
     <a href="/notifications" class="bell" title="Notifications">🔔{% if unread_count %}<span class="badge-count">{{ unread_count }}</span>{% endif %}</a>
-    <span class="who">{{ current_user.full_name }} <small>({{ current_user.role.value }})</small></span>
+    <a class="who" href="/me/password" title="Change password">{{ current_user.full_name }} <small>({{ current_user.role.value }})</small></a>
     <form method="post" action="/logout">{{ csrf_input }}<button class="btn btn-ghost btn-sm">Sign out</button></form>
   </div>
   {% endif %}

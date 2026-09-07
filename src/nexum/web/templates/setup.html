@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="login-box wide">
+  <h1>Welcome to {{ settings.app_name }}</h1>
+  <p class="muted">Three things and you are in: your company, its time zone and currency, and the first administrator.</p>
+  <form method="post" action="/setup" class="stack">{{ csrf_input }}
+    <h2>Company</h2>
+    <label>Company name <input name="name" value="{{ form.name }}" required autofocus></label>
+    <div class="row">
+      <label>Time zone <select name="timezone">{% for tz in timezones %}<option value="{{ tz }}" {{ 'selected' if tz == form.timezone }}>{{ tz }}</option>{% endfor %}</select></label>
+      <label>Currency <input name="currency" value="{{ form.currency }}" maxlength="3" required></label>
+    </div>
+    <h2>Administrator</h2>
+    <label>Your name <input name="admin_name" value="{{ form.admin_name }}" required></label>
+    <label>Email <input type="email" name="admin_email" value="{{ form.admin_email }}" required></label>
+    <div class="row">
+      <label>Password <input type="password" name="password" minlength="8" required></label>
+      <label>Repeat password <input type="password" name="password_confirm" minlength="8" required></label>
+    </div>
+    <button class="btn btn-primary">Create company</button>
+  </form>
+</div>
+{% endblock %}

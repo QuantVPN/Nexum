@@ -3,7 +3,7 @@
 from nexum.models.audit import AuditLog
 from nexum.models.automation import AutomationRule, AutomationRun, RunStatus, TriggerType
 from nexum.models.company import CompanySettings, PayPeriodType
-from nexum.models.identity import ROLE_RANK, Role, User
+from nexum.models.identity import ROLE_RANK, PasswordResetToken, Role, User
 from nexum.models.notifications import Notification, NotificationLevel
 from nexum.models.org import Department
 from nexum.models.payroll import PayPeriod, PayPeriodStatus, Payslip
@@ -41,6 +41,7 @@ __all__ = [
     "EmploymentType",
     "Notification",
     "NotificationLevel",
+    "PasswordResetToken",
     "PayPeriod",
     "PayPeriodStatus",
     "PayPeriodType",

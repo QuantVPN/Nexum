@@ -31,6 +31,47 @@ access_log = logging.getLogger("nexum.access")
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 
 
+CSP_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; "
+    "frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+)
+CSP_EXEMPT_PREFIXES = ("/api/docs", "/api/redoc", "/api/openapi.json")
+SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+    (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+    (b"cross-origin-opener-policy", b"same-origin"),
+)
+
+
+class SecurityHeadersMiddleware:
+    """Adds the standard hardening headers and a Content-Security-Policy (the API docs are
+    exempt because Swagger UI loads its assets from a CDN)."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        exempt = path.startswith(CSP_EXEMPT_PREFIXES)
+
+        async def send_wrapper(message: Any) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend(SECURITY_HEADERS)
+                if not exempt:
+                    headers.append((b"content-security-policy", CSP_POLICY.encode()))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
 class RequestContextMiddleware:
     """Tags every request with an id (``X-Request-ID``) and writes one access-log line."""
 
@@ -112,6 +153,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         same_site="lax",
         https_only=settings.environment == "production",
     )
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestContextMiddleware)
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

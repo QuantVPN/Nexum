@@ -16,7 +16,7 @@ def page(client: TestClient, url: str, expect: int = 200) -> str:
     return r.text
 
 
-def test_anonymous_redirects_to_login(client: TestClient) -> None:
+def test_anonymous_redirects_to_login(client: TestClient, company: Company) -> None:
     assert client.get("/").headers["location"] == "/login"
     r = client.get("/dashboard")
     assert r.status_code == 303 and r.headers["location"].startswith("/login?next=/dashboard")

@@ -71,3 +71,4 @@ details.run { border-bottom: 1px solid var(--line); padding: 6px 0; } details.ru
 }
 .payslip .num { text-align: right; } .payslip tfoot th { font-size: 15px; } .small { font-size: 12px; }
 .bar { background: #eef1f6; border-radius: 4px; height: 8px; width: 120px; overflow: hidden; } .bar-fill { background: var(--accent); height: 100%; }
+.login-box.wide { max-width: 560px; } .who { color: var(--ink); }
