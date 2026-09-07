@@ -2,7 +2,7 @@
 {% block content %}
 <div class="page-head">
   <h1>Automations</h1>
-  {% if current_user.has_role(Role.ADMIN) %}<a class="btn btn-primary btn-sm" href="/automations/new">New automation</a>{% endif %}
+  <div class="row"><a class="btn btn-sm" href="/automations/report">Report</a>{% if current_user.has_role(Role.ADMIN) %}<a class="btn btn-primary btn-sm" href="/automations/new">New automation</a>{% endif %}</div>
 </div>
 <section class="tiles">
   <div class="tile accent"><span class="label">Hours saved, all time</span><span class="value">{{ stats.hours_saved_total }} h</span><span class="sub">{{ stats.minutes_saved_7d }} min in the last 7 days</span></div>

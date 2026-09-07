@@ -18,8 +18,10 @@ import httpx
 from sqlalchemy import select
 
 from nexum.automation.context import ActionResult, RunContext, render
+from nexum.automation.retry import with_retries
 from nexum.errors import NexumError, ValidationError
 from nexum.models import (
+    Department,
     Employee,
     Notification,
     NotificationLevel,
@@ -29,11 +31,21 @@ from nexum.models import (
     Shift,
     ShiftRequestKind,
     ShiftRequestStatus,
+    ShiftStatus,
+    TimeEntry,
     TimeOffStatus,
+    User,
 )
-from nexum.services import notifications, payroll, people, scheduling, time_tracking
-from nexum.services.calendar import local_date, week_start, week_window
-from nexum.services.company import payroll_rules
+from nexum.services import mailer, notifications, payroll, people, scheduling, time_tracking
+from nexum.services.calendar import (
+    day_window,
+    iter_days,
+    local_date,
+    to_local,
+    week_start,
+    week_window,
+)
+from nexum.services.company import get_company, payroll_rules
 
 ActionFn = Callable[..., ActionResult]
 
@@ -190,9 +202,108 @@ def webhook(ctx: RunContext, **params: Any) -> ActionResult:
         "event": ctx.event.name if ctx.event else None,
         "context": json.loads(json.dumps(ctx.as_mapping(), default=str)),
     }
-    response = httpx.post(url, json=payload, timeout=float(params.get("timeout", 10)))
-    response.raise_for_status()
+
+    def call() -> httpx.Response:
+        response = httpx.post(url, json=payload, timeout=float(params.get("timeout", 10)))
+        response.raise_for_status()
+        return response
+
+    response = with_retries(
+        call,
+        attempts=ctx.settings.automation_retry_attempts,
+        backoff_seconds=ctx.settings.automation_retry_backoff_seconds,
+        log=ctx.say,
+    )
     return ActionResult(f"POST {url} -> {response.status_code}", count=1, work_done=True)
+
+
+@action(
+    "chat_webhook",
+    "Post a message to a Slack/Teams incoming webhook (requires webhooks to be enabled).",
+    {"url": "https://hooks.slack.com/...", "text": "template"},
+)
+def chat_webhook(ctx: RunContext, **params: Any) -> ActionResult:
+    url = params.get("url")
+    if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+        raise ValidationError("chat_webhook needs an http(s) url")
+    if not ctx.settings.automation_webhooks_enabled:
+        return ActionResult("webhooks disabled by configuration; skipped")
+    text = render(params.get("text"), ctx.as_mapping()) or ctx.rule.name
+
+    def call() -> httpx.Response:
+        response = httpx.post(url, json={"text": text}, timeout=float(params.get("timeout", 10)))
+        response.raise_for_status()
+        return response
+
+    with_retries(
+        call,
+        attempts=ctx.settings.automation_retry_attempts,
+        backoff_seconds=ctx.settings.automation_retry_backoff_seconds,
+        log=ctx.say,
+    )
+    return ActionResult(f"posted to chat: {text[:60]}", count=1, work_done=True)
+
+
+def _recipients(ctx: RunContext, params: dict[str, Any], mapping: dict[str, Any]) -> list[str]:
+    addresses: list[str] = []
+    if params.get("to"):
+        addresses += [a.strip() for a in str(params["to"]).split(",") if a.strip()]
+    if params.get("role"):
+        role = _role(str(params["role"]))
+        users = ctx.session.scalars(select(User).where(User.is_active.is_(True))).all()
+        addresses += [u.email for u in users if u.has_role(role)]
+    employee_ref: Any = params.get("employee_id")
+    if employee_ref is None and "employee_id" in mapping.get("event", {}):
+        employee_ref = mapping["event"]["employee_id"]
+    if isinstance(employee_ref, str):
+        rendered = render(employee_ref, mapping).strip()
+        employee_ref = int(rendered) if rendered.isdigit() else None
+    if isinstance(employee_ref, int):
+        employee = ctx.session.get(Employee, employee_ref)
+        if employee is not None:
+            addresses.append(employee.email)
+    unique: list[str] = []
+    for address in addresses:
+        if address not in unique:
+            unique.append(address)
+    return unique
+
+
+@action(
+    "send_email",
+    "Send an e-mail (needs SMTP in company settings) to addresses, a role and/or an employee.",
+    {
+        "to": "comma separated addresses",
+        "role": "admin|manager|employee",
+        "employee_id": "int or template",
+        "subject": "template",
+        "body": "template",
+    },
+)
+def send_email(ctx: RunContext, **params: Any) -> ActionResult:
+    settings = get_company(ctx.session)
+    if not settings.email_configured:
+        return ActionResult("e-mail is not configured; skipped")
+    mapping = ctx.as_mapping()
+    recipients = _recipients(ctx, params, mapping)
+    if not recipients:
+        return ActionResult("no recipients; nothing sent")
+    subject = render(params.get("subject"), mapping) or ctx.rule.name
+    body = render(params.get("body"), mapping) or subject
+    sent = 0
+    for address in recipients:
+
+        def deliver(to: str = address) -> bool:
+            return mailer.send(settings, to, subject, body)
+
+        with_retries(
+            deliver,
+            attempts=ctx.settings.automation_retry_attempts,
+            backoff_seconds=ctx.settings.automation_retry_backoff_seconds,
+            log=ctx.say,
+        )
+        sent += 1
+    return ActionResult(f"sent {sent} e-mail(s): {subject}", count=sent, work_done=sent > 0)
 
 
 # --- scheduling ----------------------------------------------------------------------------
@@ -450,6 +561,182 @@ def nudge_pending_approvals(ctx: RunContext, **params: Any) -> ActionResult:
         source=source,
     )
     return ActionResult(f"nudged managers about {total} item(s)", count=total, work_done=True)
+
+
+@action(
+    "flag_no_shows",
+    "Alert the employee and managers when a published shift started without a clock-in.",
+    {"grace_minutes": "int (default 15)", "lookback_hours": "int (default 3)"},
+)
+def flag_no_shows(ctx: RunContext, **params: Any) -> ActionResult:
+    grace = timedelta(minutes=int(params.get("grace_minutes", 15)))
+    lookback = timedelta(hours=int(params.get("lookback_hours", 3)))
+    stmt = (
+        select(Shift)
+        .where(
+            Shift.status == ShiftStatus.PUBLISHED,
+            Shift.employee_id.is_not(None),
+            Shift.starts_at <= ctx.now - grace,
+            Shift.starts_at >= ctx.now - lookback,
+        )
+        .order_by(Shift.starts_at)
+    )
+    flagged = 0
+    for shift in ctx.session.scalars(stmt):
+        if shift.employee is None or shift.time_entries:
+            continue
+        clocked = ctx.session.scalar(
+            select(TimeEntry.id)
+            .where(
+                TimeEntry.employee_id == shift.employee_id,
+                TimeEntry.clock_in >= shift.starts_at - timedelta(hours=1),
+                TimeEntry.clock_in <= shift.ends_at,
+            )
+            .limit(1)
+        )
+        if clocked is not None:
+            continue
+        source = f"no-show:{shift.id}"
+        if _already_notified(ctx, source) or _already_notified(ctx, f"{source}:managers"):
+            continue
+        when = to_local(shift.starts_at).strftime("%a %d %b %H:%M")
+        notifications.notify_employee(
+            ctx.session,
+            shift.employee,
+            f"Your shift started at {when} - please clock in",
+            "No clock-in has been recorded for this shift.",
+            level=NotificationLevel.WARNING,
+            link="/me/time",
+            source=source,
+        )
+        notifications.notify_role(
+            ctx.session,
+            Role.MANAGER,
+            f"No-show? {shift.employee.full_name} has not clocked in ({when})",
+            f"{shift.department.name} shift started {when}; no time entry yet.",
+            level=NotificationLevel.WARNING,
+            link="/schedule",
+            source=f"{source}:managers",
+        )
+        flagged += 1
+    return ActionResult(
+        f"flagged {flagged} possible no-show(s)", count=flagged, work_done=flagged > 0
+    )
+
+
+@action(
+    "flag_long_open_entries",
+    "Remind employees (and managers) about time entries that were never clocked out.",
+    {"max_hours": "int (default 14)"},
+)
+def flag_long_open_entries(ctx: RunContext, **params: Any) -> ActionResult:
+    cutoff = ctx.now - timedelta(hours=int(params.get("max_hours", 14)))
+    stmt = select(TimeEntry).where(TimeEntry.clock_out.is_(None), TimeEntry.clock_in <= cutoff)
+    flagged = 0
+    for entry in ctx.session.scalars(stmt):
+        source = f"open-entry:{entry.id}"
+        if _already_notified(ctx, source) or _already_notified(ctx, f"{source}:managers"):
+            continue
+        since = to_local(entry.clock_in).strftime("%a %d %b %H:%M")
+        notifications.notify_employee(
+            ctx.session,
+            entry.employee,
+            "You are still clocked in",
+            f"Clocked in since {since}. Clock out or report the correct hours.",
+            level=NotificationLevel.WARNING,
+            link="/me/time",
+            source=source,
+        )
+        notifications.notify_role(
+            ctx.session,
+            Role.MANAGER,
+            f"{entry.employee.full_name} has an open time entry since {since}",
+            "It will not count for payroll until it is closed and approved.",
+            link="/approvals",
+            source=f"{source}:managers",
+        )
+        flagged += 1
+    return ActionResult(f"flagged {flagged} open entr(y/ies)", count=flagged, work_done=flagged > 0)
+
+
+@action(
+    "understaffing_forecast",
+    "Compare template headcount with assigned shifts per day and warn managers about gaps.",
+    {"days": "int (default 7)"},
+)
+def understaffing_forecast(ctx: RunContext, **params: Any) -> ActionResult:
+    from nexum.models import ScheduleTemplate
+
+    start_day = local_date(ctx.now) + timedelta(days=1)
+    end_day = start_day + timedelta(days=int(params.get("days", 7)) - 1)
+    templates = list(ctx.session.scalars(select(ScheduleTemplate)))
+    gaps: list[str] = []
+    for day in iter_days(start_day, end_day):
+        required: dict[int, int] = {}
+        for template in templates:
+            if template.weekday == day.weekday():
+                required[template.department_id] = (
+                    required.get(template.department_id, 0) + template.headcount
+                )
+        if not required:
+            continue
+        lo, hi = day_window(day)
+        assigned: dict[int, int] = {}
+        for shift in scheduling.list_shifts(ctx.session, lo, hi):
+            if shift.employee_id is not None:
+                assigned[shift.department_id] = assigned.get(shift.department_id, 0) + 1
+        for department_id, need in required.items():
+            have = assigned.get(department_id, 0)
+            if have < need:
+                department = ctx.session.get(Department, department_id)
+                name = department.name if department else f"department {department_id}"
+                gaps.append(f"{day:%a %d %b}: {name} has {have}/{need} shifts staffed")
+    if not gaps:
+        return ActionResult("staffing matches the templates for the coming days")
+    source = f"understaffing:{local_date(ctx.now).isoformat()}:{ctx.rule.id}"
+    if _already_notified(ctx, source):
+        return ActionResult(f"{len(gaps)} gap(s); managers already warned today", count=len(gaps))
+    notifications.notify_role(
+        ctx.session,
+        Role.MANAGER,
+        f"Understaffing ahead: {len(gaps)} gap(s) in the next {params.get('days', 7)} days",
+        "\n".join(gaps[:20]),
+        level=NotificationLevel.WARNING,
+        link="/schedule",
+        source=source,
+    )
+    return ActionResult(f"warned about {len(gaps)} gap(s)", count=len(gaps), work_done=True)
+
+
+@action(
+    "contract_end_reminders",
+    "Remind managers about employees whose contract ends within the coming days.",
+    {"days": "int (default 30)"},
+)
+def contract_end_reminders(ctx: RunContext, **params: Any) -> ActionResult:
+    horizon = local_date(ctx.now) + timedelta(days=int(params.get("days", 30)))
+    reminded = 0
+    for employee in people.list_employees(ctx.session):
+        if employee.end_date is None or employee.end_date > horizon:
+            continue
+        if employee.end_date < local_date(ctx.now):
+            continue
+        source = f"contract-end:{employee.id}:{employee.end_date.isoformat()}"
+        if _already_notified(ctx, source):
+            continue
+        kind = employee.employment_type.value.replace("_", " ")
+        notifications.notify_role(
+            ctx.session,
+            Role.MANAGER,
+            f"{employee.full_name}'s {kind} contract ends {employee.end_date:%d %b}",
+            "Decide on renewal, hand-over and access removal.",
+            link=f"/employees/{employee.id}",
+            source=source,
+        )
+        reminded += 1
+    return ActionResult(
+        f"reminded about {reminded} ending contract(s)", count=reminded, work_done=reminded > 0
+    )
 
 
 # --- payroll ------------------------------------------------------------------------------

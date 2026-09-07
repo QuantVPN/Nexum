@@ -870,78 +870,192 @@ def automations_page(request: Request, db: DbSession, user: ManagerUser) -> Resp
     )
 
 
-@web_router.get("/automations/new", response_class=HTMLResponse)
-def automation_new(request: Request, db: DbSession, user: AdminUser) -> Response:
+def trigger_config_from_form(trigger_type: TriggerType, form: dict[str, Any]) -> dict[str, Any]:
+    """Build ``trigger_config`` from the structured trigger fields of the rule form."""
+    if trigger_type == TriggerType.EVENT:
+        return {"event": str(form.get("event") or "")}
+    if trigger_type == TriggerType.MANUAL:
+        return {}
+    kind = str(form.get("schedule_kind") or "daily")
+    config: dict[str, Any] = {"kind": kind}
+    try:
+        if kind == "interval":
+            config["minutes"] = int(form.get("interval_minutes") or 60)
+        elif kind == "hourly":
+            config["minute"] = int(form.get("hourly_minute") or 0)
+        else:
+            config["at"] = str(form.get("at") or "07:00")
+            if kind == "weekly":
+                config["weekday"] = int(form.get("weekday") or 0)
+            if kind == "monthly":
+                config["day"] = int(form.get("day") or 1)
+    except ValueError as exc:
+        raise ValidationError("Schedule fields must be whole numbers") from exc
+    return config
+
+
+def form_from_rule(rule: AutomationRule | None) -> dict[str, Any]:
+    if rule is None:
+        return {"trigger_type": "schedule", "schedule_kind": "daily", "at": "07:00"}
+    config = rule.trigger_config
+    return {
+        "name": rule.name,
+        "description": rule.description or "",
+        "trigger_type": rule.trigger_type.value,
+        "schedule_kind": config.get("kind", "daily"),
+        "interval_minutes": config.get("minutes", 60),
+        "hourly_minute": config.get("minute", 0),
+        "at": config.get("at", "07:00"),
+        "weekday": config.get("weekday", 0),
+        "day": config.get("day", 1),
+        "event": config.get("event", ""),
+        "conditions": json.dumps(rule.conditions, indent=2),
+        "actions": json.dumps(rule.actions, indent=2),
+        "estimated_minutes_saved": rule.estimated_minutes_saved,
+        "enabled": rule.enabled,
+    }
+
+
+def _render_rule_form(
+    request: Request,
+    db: Session,
+    user: User,
+    *,
+    rule: AutomationRule | None,
+    form: dict[str, Any],
+    status_code: int = 200,
+) -> Response:
     return render(
         request,
         "automation_form.html",
         db=db,
         user=user,
-        title="New automation",
+        title="Edit automation" if rule else "New automation",
+        status_code=status_code,
+        rule=rule,
         actions=list_actions(),
         events=EVENT_NAMES,
         schedule_kinds=schedule_rules.KINDS,
-        form={},
+        weekdays=["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+        form=form,
     )
 
 
-@web_router.post("/automations/new")
-def automation_create(
-    request: Request,
-    db: DbSession,
-    user: AdminUser,
-    name: FormStr,
-    trigger_type: FormStr,
-    actions: FormStr,
-    description: FormOptStr = None,
-    trigger_config: FormOptStr = None,
-    conditions: FormOptStr = None,
-    estimated_minutes_saved: FormOptStr = None,
+async def _save_rule_from_form(
+    request: Request, db: Session, user: User, rule: AutomationRule | None
 ) -> Response:
+    raw = await request.form()
+    form: dict[str, Any] = {k: v for k, v in raw.items() if isinstance(v, str)}
     try:
-        trig = TriggerType(trigger_type)
-        config = parse_json(trigger_config, "Trigger config", {})
-        conds = parse_json(conditions, "Conditions", [])
-        acts = parse_json(actions, "Actions", [])
+        trig = TriggerType(str(form.get("trigger_type") or "schedule"))
+        config = trigger_config_from_form(trig, form)
+        conds = parse_json(form.get("conditions"), "Conditions", [])
+        acts = parse_json(form.get("actions"), "Actions", [])
+        name = str(form.get("name") or "").strip()
+        if not name:
+            raise ValidationError("Name is required")
         AutomationEngine.validate_rule(trig, config, conds, acts)
-        rule = AutomationRule(
-            name=name.strip(),
-            description=(description or "").strip() or None,
-            trigger_type=trig,
-            trigger_config=config,
-            conditions=conds,
-            actions=acts,
-            estimated_minutes_saved=int(parse_decimal(estimated_minutes_saved, "Minutes saved")),
-        )
-        db.add(rule)
+        minutes = int(parse_decimal(form.get("estimated_minutes_saved"), "Minutes saved"))
+        if rule is None:
+            rule = AutomationRule(name=name)
+            db.add(rule)
+        rule.name = name
+        rule.description = str(form.get("description") or "").strip() or None
+        rule.trigger_type = trig
+        rule.trigger_config = config
+        rule.conditions = conds
+        rule.actions = acts
+        rule.estimated_minutes_saved = minutes
+        rule.enabled = form.get("enabled", "1") == "1"
+        rule.next_run_at = None
         db.flush()
-        audit.record(db, "automation.rule_created", "automation_rule", rule.id, actor=user)
+        audit.record(
+            db,
+            "automation.rule_updated" if rule.run_count else "automation.rule_created",
+            "automation_rule",
+            rule.id,
+            actor=user,
+        )
         db.commit()
     except (NexumError, ValueError) as exc:
         db.rollback()
         flash(request, str(exc), "error")
-        return render(
-            request,
-            "automation_form.html",
-            db=db,
-            user=user,
-            title="New automation",
-            actions=list_actions(),
-            events=EVENT_NAMES,
-            schedule_kinds=schedule_rules.KINDS,
-            form={
-                "name": name,
-                "description": description,
-                "trigger_type": trigger_type,
-                "trigger_config": trigger_config,
-                "conditions": conditions,
-                "actions": actions,
-                "estimated_minutes_saved": estimated_minutes_saved,
-            },
-            status_code=422,
-        )
-    flash(request, f"Automation '{rule.name}' created")
+        return _render_rule_form(request, db, user, rule=rule, form=form, status_code=422)
+    flash(request, f"Automation '{rule.name}' saved")
     return redirect(f"/automations/{rule.id}")
+
+
+@web_router.get("/automations/report", response_class=HTMLResponse)
+def automations_report_page(request: Request, db: DbSession, user: ManagerUser) -> Response:
+    days = int_query(request, "days") or 30
+    return render(
+        request,
+        "automation_report.html",
+        db=db,
+        user=user,
+        title="Automation report",
+        report=dashboard.automation_report(db, days=days),
+    )
+
+
+@web_router.get("/automations/new", response_class=HTMLResponse)
+def automation_new(request: Request, db: DbSession, user: AdminUser) -> Response:
+    return _render_rule_form(request, db, user, rule=None, form=form_from_rule(None))
+
+
+@web_router.get("/automations/{rule_id}/edit", response_class=HTMLResponse)
+def automation_edit(request: Request, db: DbSession, user: AdminUser, rule_id: int) -> Response:
+    rule = _rule_or_404(db, rule_id)
+    return _render_rule_form(request, db, user, rule=rule, form=form_from_rule(rule))
+
+
+@web_router.post("/automations/{rule_id}/edit")
+async def automation_edit_save(
+    request: Request, db: DbSession, user: AdminUser, rule_id: int
+) -> Response:
+    return await _save_rule_from_form(request, db, user, _rule_or_404(db, rule_id))
+
+
+@web_router.post("/automations/{rule_id}/dry-run")
+def automation_dry_run(
+    request: Request, db: DbSession, user: ManagerUser, rule_id: int
+) -> Response:
+    rule = _rule_or_404(db, rule_id)
+    db.commit()
+    run = get_engine().run_rule_id(rule.id, manual=True, dry_run=True)
+    level = "success" if run.status.value != "failed" else "error"
+    flash(request, f"Dry run {run.status.value}: {' | '.join(run.log)}", level)
+    return redirect(f"/automations/{rule_id}")
+
+
+@web_router.post("/automations/{rule_id}/duplicate")
+def automation_duplicate(
+    request: Request, db: DbSession, user: AdminUser, rule_id: int
+) -> Response:
+    source = _rule_or_404(db, rule_id)
+    copy = AutomationRule(
+        name=f"{source.name} (copy)",
+        description=source.description,
+        enabled=False,
+        trigger_type=source.trigger_type,
+        trigger_config=dict(source.trigger_config),
+        conditions=list(source.conditions),
+        actions=list(source.actions),
+        estimated_minutes_saved=source.estimated_minutes_saved,
+    )
+    db.add(copy)
+    db.flush()
+    audit.record(
+        db, "automation.rule_duplicated", "automation_rule", copy.id, actor=user, source=source.id
+    )
+    db.commit()
+    flash(request, "Copy created (disabled). Edit it, then enable it.")
+    return redirect(f"/automations/{copy.id}/edit")
+
+
+@web_router.post("/automations/new")
+async def automation_create(request: Request, db: DbSession, user: AdminUser) -> Response:
+    return await _save_rule_from_form(request, db, user, None)
 
 
 @web_router.get("/automations/{rule_id}", response_class=HTMLResponse)
@@ -1431,6 +1545,16 @@ def notifications_page(request: Request, db: DbSession, user: CurrentUser) -> Re
     return render(
         request, "notifications.html", db=db, user=user, title="Notifications", items=items
     )
+
+
+@web_router.post("/notifications/preferences")
+def notifications_preferences(
+    request: Request, db: DbSession, user: CurrentUser, email_notifications: FormOptStr = None
+) -> Response:
+    user.email_notifications = email_notifications == "1"
+    db.commit()
+    flash(request, "Preferences saved")
+    return redirect("/notifications")
 
 
 @web_router.post("/notifications/read-all")

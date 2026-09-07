@@ -6,6 +6,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from nexum.models import Employee, Notification, NotificationLevel, Role, User
+from nexum.services import mailer
+from nexum.services.company import get_company
 
 
 def notify_user(
@@ -22,7 +24,18 @@ def notify_user(
         user_id=user.id, title=title, body=body, level=level, link=link, source=source
     )
     session.add(note)
+    deliver_email(session, user, title, body)
     return note
+
+
+def deliver_email(session: Session, user: User, title: str, body: str | None) -> bool:
+    """Mirror a notification to e-mail when the company and the user opted in."""
+    settings = get_company(session)
+    if not (settings.email_notifications_enabled and settings.email_configured):
+        return False
+    if not user.email_notifications or not user.is_active:
+        return False
+    return mailer.try_send(settings, user.email, f"[{settings.name}] {title}", body or title)
 
 
 def notify_employee(

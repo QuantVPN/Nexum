@@ -198,27 +198,31 @@ def test_automation_pages_and_forms(client: TestClient, company: Company, recipe
     r = post(
         client,
         "/automations/new",
-        data={
+        {
             "name": "Broken",
             "trigger_type": "schedule",
-            "trigger_config": "{oops",
-            "actions": "[]",
+            "schedule_kind": "daily",
+            "at": "07:00",
+            "actions": "{oops",
         },
     )
     assert r.status_code == 422 and "invalid JSON" in r.text and 'value="Broken"' in r.text
     r = post(
         client,
         "/automations/new",
-        data={
+        {
             "name": "Friday note",
             "trigger_type": "schedule",
-            "trigger_config": '{"kind": "weekly", "weekday": 4, "at": "15:00"}',
+            "schedule_kind": "weekly",
+            "weekday": "4",
+            "at": "15:00",
             "conditions": "[]",
             "actions": '[{"type": "notify_role", "params": {"role": "employee", "title": "Nice weekend"}}]',
             "estimated_minutes_saved": "3",
+            "enabled": "1",
         },
     )
-    assert r.status_code == 303
+    assert r.status_code == 303, r.text
     url = r.headers["location"]
     html = page(client, url)
     assert "Friday note" in html and "weekly on Fri at 15:00 UTC" in html

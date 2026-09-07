@@ -176,3 +176,51 @@ def department_summary(session: Session, now: datetime | None = None) -> list[di
             }
         )
     return rows
+
+
+def automation_report(
+    session: Session, now: datetime | None = None, days: int = 30
+) -> dict[str, Any]:
+    """Per-rule effectiveness over the last ``days`` days."""
+    now = now or utcnow()
+    since = now - timedelta(days=days)
+    week_ago = now - timedelta(days=7)
+    rules = list(session.scalars(select(AutomationRule).order_by(AutomationRule.name)))
+    runs = list(session.scalars(select(AutomationRun).where(AutomationRun.started_at >= since)))
+    by_rule: dict[int, list[AutomationRun]] = {}
+    for run in runs:
+        by_rule.setdefault(run.rule_id, []).append(run)
+    rows: list[dict[str, Any]] = []
+    total_minutes = 0
+    for rule in rules:
+        mine = by_rule.get(rule.id, [])
+        failed = [r for r in mine if r.status == RunStatus.FAILED]
+        durations = [r.duration_ms for r in mine if r.duration_ms is not None]
+        minutes = sum(r.minutes_saved for r in mine)
+        total_minutes += minutes
+        last_failure = max(failed, key=lambda r: r.id, default=None)
+        rows.append(
+            {
+                "rule": rule,
+                "runs": len(mine),
+                "runs_7d": sum(1 for r in mine if r.started_at >= week_ago),
+                "success": sum(1 for r in mine if r.status == RunStatus.SUCCESS),
+                "skipped": sum(1 for r in mine if r.status == RunStatus.SKIPPED),
+                "failed": len(failed),
+                "minutes_saved": minutes,
+                "avg_duration_ms": round(sum(durations) / len(durations)) if durations else 0,
+                "last_failure": last_failure,
+            }
+        )
+    for row in rows:
+        row["share"] = round(100 * row["minutes_saved"] / total_minutes) if total_minutes else 0
+    rows.sort(key=lambda r: (-r["minutes_saved"], -r["runs"], r["rule"].name))
+    return {
+        "days": days,
+        "since": since,
+        "rows": rows,
+        "total_runs": len(runs),
+        "total_failed": sum(1 for r in runs if r.status == RunStatus.FAILED),
+        "total_minutes_saved": total_minutes,
+        "total_hours_saved": round(total_minutes / 60, 1),
+    }

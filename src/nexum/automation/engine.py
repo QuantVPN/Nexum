@@ -137,12 +137,15 @@ class AutomationEngine:
         now: datetime | None = None,
         manual: bool = False,
         depth: int = 0,
+        dry_run: bool = False,
     ) -> AutomationRun:
         with self._session_factory() as session:
             rule = session.get(AutomationRule, rule_id)
             if rule is None:
                 raise NotFoundError(f"Automation rule {rule_id} not found")
-            run = self.run_rule(session, rule, event=event, now=now, manual=manual, depth=depth)
+            run = self.run_rule(
+                session, rule, event=event, now=now, manual=manual, depth=depth, dry_run=dry_run
+            )
             if run.id is not None:  # persisted; detach so callers can use it after close
                 session.refresh(run)
                 session.expunge(run)
@@ -157,7 +160,10 @@ class AutomationEngine:
         now: datetime | None = None,
         manual: bool = False,
         depth: int = 0,
+        dry_run: bool = False,
     ) -> AutomationRun:
+        """Evaluate and execute one rule. With ``dry_run`` every change is rolled back and
+        nothing is recorded; the returned run only carries the status and log."""
         now = now or self.clock()
         ctx = RunContext(
             session=session, settings=self.settings, rule=rule, now=now, event=event, depth=depth
@@ -172,6 +178,8 @@ class AutomationEngine:
         error: str | None = None
         work_done = False
         pending: list[DomainEvent] = []
+        if dry_run:
+            trigger_summary = "dry run"
 
         try:
             if not conditions.evaluate(rule.conditions, ctx.as_mapping()):
@@ -197,6 +205,18 @@ class AutomationEngine:
 
         rule = session.merge(rule) if status == RunStatus.FAILED else rule
         finished = self.clock()
+        if dry_run:
+            session.rollback()
+            ctx.say("dry run: all changes rolled back")
+            return AutomationRun(
+                rule_id=rule.id,
+                started_at=started,
+                finished_at=finished,
+                status=status,
+                trigger_summary=trigger_summary,
+                log=list(ctx.log),
+                error=error,
+            )
         if status == RunStatus.SKIPPED and event is not None and not manual:
             # Event rules see every event of their kind; a non-match is routine, not history.
             log.debug("rule %s skipped event %s (conditions not met)", rule.name, event.name)

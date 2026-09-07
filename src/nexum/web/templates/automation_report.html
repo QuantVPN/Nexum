@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Automation report · last {{ report.days }} days</h1>
+  <div class="row">
+    {% for d in [7, 30, 90] %}<a class="btn btn-sm {{ 'btn-primary' if report.days == d }}" href="/automations/report?days={{ d }}">{{ d }} days</a>{% endfor %}
+    <a class="btn btn-sm btn-ghost" href="/automations">Rules</a>
+  </div>
+</div>
+<section class="tiles">
+  <div class="tile accent"><span class="label">Hours saved</span><span class="value">{{ report.total_hours_saved }} h</span><span class="sub">{{ report.total_minutes_saved }} minutes across {{ report.rows|length }} rules</span></div>
+  <div class="tile"><span class="label">Runs</span><span class="value">{{ report.total_runs }}</span><span class="sub">since {{ report.since|d }}</span></div>
+  <div class="tile {{ 'warn' if report.total_failed }}"><span class="label">Failed runs</span><span class="value">{{ report.total_failed }}</span><span class="sub">{{ 'investigate below' if report.total_failed else 'all clear' }}</span></div>
+</section>
+<section class="card">
+  <table><thead><tr><th>Rule</th><th>Share of value</th><th>Runs</th><th>7 days</th><th>OK</th><th>Skipped</th><th>Failed</th><th>Avg ms</th><th>Minutes saved</th><th>Last failure</th></tr></thead><tbody>
+  {% for row in report.rows %}
+    <tr class="{{ 'inactive' if not row.rule.enabled }}">
+      <td><a href="/automations/{{ row.rule.id }}">{{ row.rule.name }}</a>{% if not row.rule.enabled %} <span class="badge badge-muted">off</span>{% endif %}</td>
+      <td><div class="bar"><div class="bar-fill" style="width: {{ row.share }}%"></div></div><small class="muted">{{ row.share }}%</small></td>
+      <td>{{ row.runs }}</td><td>{{ row.runs_7d }}</td><td>{{ row.success }}</td><td>{{ row.skipped }}</td>
+      <td>{% if row.failed %}<span class="badge badge-failed">{{ row.failed }}</span>{% else %}0{% endif %}</td>
+      <td>{{ row.avg_duration_ms }}</td><td><strong>{{ row.minutes_saved }}</strong></td>
+      <td><small class="muted">{% if row.last_failure %}{{ row.last_failure.started_at|dt }}: {{ (row.last_failure.error or '')[:80] }}{% endif %}</small></td>
+    </tr>
+  {% else %}<tr><td colspan="10" class="muted">No rules yet.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

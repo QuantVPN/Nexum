@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>Notifications</h1><form method="post" action="/notifications/read-all">{{ csrf_input }}<button class="btn btn-sm">Mark all read</button></form></div>
+<div class="page-head"><h1>Notifications</h1>
+  <div class="row">
+    <form method="post" action="/notifications/preferences" class="row tight">{{ csrf_input }}
+      <label class="check"><input type="checkbox" name="email_notifications" value="1" {{ 'checked' if current_user.email_notifications }} data-autosubmit> also e-mail me</label>
+    </form>
+    <form method="post" action="/notifications/read-all">{{ csrf_input }}<button class="btn btn-sm">Mark all read</button></form>
+  </div>
+</div>
 <section class="card">
   <ul class="list notifications">
     {% for n in items %}

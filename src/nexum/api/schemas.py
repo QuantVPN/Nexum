@@ -59,6 +59,7 @@ class UserOut(ORMModel):
     full_name: str
     role: Role
     is_active: bool
+    email_notifications: bool = True
     employee_id: int | None = None
 
 

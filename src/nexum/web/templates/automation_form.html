@@ -1,33 +1,54 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-head"><h1>New automation</h1><a class="btn btn-sm" href="/automations">Cancel</a></div>
+<div class="page-head"><h1>{{ 'Edit automation' if rule else 'New automation' }}</h1><a class="btn btn-sm" href="{{ '/automations/' ~ rule.id if rule else '/automations' }}">Cancel</a></div>
 <div class="columns wide-left">
   <section class="card">
-    <form method="post" action="/automations/new" class="stack">{{ csrf_input }}
-      <label>Name <input name="name" value="{{ form.get('name') or '' }}" required></label>
-      <label>Description <input name="description" value="{{ form.get('description') or '' }}"></label>
-      <div class="row">
-        <label>Trigger type
-          <select name="trigger_type">
-            <option value="schedule" {{ 'selected' if form.get('trigger_type') == 'schedule' }}>schedule</option>
-            <option value="event" {{ 'selected' if form.get('trigger_type') == 'event' }}>event</option>
-            <option value="manual" {{ 'selected' if form.get('trigger_type') == 'manual' }}>manual only</option>
-          </select>
-        </label>
-        <label>Estimated minutes saved per run <input type="number" name="estimated_minutes_saved" value="{{ form.get('estimated_minutes_saved') or 5 }}" min="0"></label>
-      </div>
-      <label>Trigger config (JSON)
-        <textarea name="trigger_config" rows="3">{{ form.get('trigger_config') or '{"kind": "daily", "at": "07:00"}' }}</textarea>
-        <small class="muted">Schedules: {"kind": "interval", "minutes": 15} · {"kind": "hourly", "minute": 0} · {"kind": "daily", "at": "07:00"} · {"kind": "weekly", "weekday": 0, "at": "06:00"} · {"kind": "monthly", "day": 1, "at": "06:00"}. Events: {"event": "shift.created"}</small>
-      </label>
+    <form method="post" action="{{ '/automations/' ~ rule.id ~ '/edit' if rule else '/automations/new' }}" class="stack">{{ csrf_input }}
+      <label>Name <input name="name" value="{{ form.get('name', '') }}" required></label>
+      <label>Description <input name="description" value="{{ form.get('description', '') }}"></label>
+      <fieldset class="stack">
+        <legend>Trigger</legend>
+        <div class="row">
+          <label>Type
+            <select name="trigger_type" data-toggle="trigger">
+              {% for t in ['schedule', 'event', 'manual'] %}<option value="{{ t }}" {{ 'selected' if form.get('trigger_type', 'schedule') == t }}>{{ t }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Schedule kind
+            <select name="schedule_kind">
+              {% for k in schedule_kinds %}<option value="{{ k }}" {{ 'selected' if form.get('schedule_kind', 'daily') == k }}>{{ k }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Event
+            <select name="event">
+              <option value="">—</option>
+              {% for e in events %}<option value="{{ e }}" {{ 'selected' if form.get('event') == e }}>{{ e }}</option>{% endfor %}
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>Every N minutes (interval) <input type="number" name="interval_minutes" value="{{ form.get('interval_minutes', 60) }}" min="1"></label>
+          <label>Minute past the hour (hourly) <input type="number" name="hourly_minute" value="{{ form.get('hourly_minute', 0) }}" min="0" max="59"></label>
+          <label>Time of day (daily/weekly/monthly, {{ timezone_name }}) <input type="time" name="at" value="{{ form.get('at', '07:00') }}"></label>
+          <label>Weekday (weekly)
+            <select name="weekday">{% for name in weekdays %}<option value="{{ loop.index0 }}" {{ 'selected' if form.get('weekday', 0)|int == loop.index0 }}>{{ name }}</option>{% endfor %}</select>
+          </label>
+          <label>Day of month (monthly) <input type="number" name="day" value="{{ form.get('day', 1) }}" min="1" max="31"></label>
+        </div>
+        <small class="muted">Only the fields for the chosen type and kind are used.</small>
+      </fieldset>
       <label>Conditions (JSON list, all must hold)
-        <textarea name="conditions" rows="3">{{ form.get('conditions') or '[]' }}</textarea>
+        <textarea name="conditions" rows="4">{{ form.get('conditions') or '[]' }}</textarea>
         <small class="muted">e.g. [{"field": "event.is_open", "op": "is_true"}, {"any": [{"field": "now.weekday", "op": "lt", "value": 5}]}]. Ops: eq ne gt gte lt lte in not_in contains startswith is_null not_null is_true is_false</small>
       </label>
       <label>Actions (JSON list, run in order)
-        <textarea name="actions" rows="6">{{ form.get('actions') or '[{"type": "notify_role", "params": {"role": "manager", "title": "Heads up: {event_name}", "body": "{event}"}}]' }}</textarea>
+        <textarea name="actions" rows="7">{{ form.get('actions') or '[{"type": "notify_role", "params": {"role": "manager", "title": "Heads up: {event_name}", "body": "{event}"}}]' }}</textarea>
       </label>
-      <button class="btn btn-primary">Create automation</button>
+      <div class="row">
+        <label>Estimated minutes saved per productive run <input type="number" name="estimated_minutes_saved" value="{{ form.get('estimated_minutes_saved', 5) }}" min="0"></label>
+        <label class="check"><input type="hidden" name="enabled" value="0"><input type="checkbox" name="enabled" value="1" {{ 'checked' if form.get('enabled', True) }}> enabled</label>
+      </div>
+      <button class="btn btn-primary">{{ 'Save changes' if rule else 'Create automation' }}</button>
     </form>
   </section>
   <aside class="stack">
@@ -38,9 +59,9 @@
       </dl>
     </section>
     <section class="card">
-      <h2>Events</h2>
-      <p class="muted compact">{% for e in events %}<code>{{ e }}</code>{% if not loop.last %} {% endif %}{% endfor %}</p>
-      <p class="muted">Templates can use <code>{event.*}</code>, <code>{employee.full_name}</code>, <code>{shift.starts_at}</code>, <code>{department.name}</code>, <code>{request.*}</code>, <code>{period.*}</code>, <code>{now.date}</code>.</p>
+      <h2>Template variables</h2>
+      <p class="muted">Use <code>{event.*}</code>, <code>{employee.full_name}</code>, <code>{shift.starts_at}</code>, <code>{department.name}</code>, <code>{request.*}</code>, <code>{shift_request.*}</code>, <code>{target.full_name}</code>, <code>{period.label}</code>, <code>{now.date}</code> in titles and bodies.</p>
+      {% if rule %}<p class="muted">Tip: use <strong>Test run</strong> on the rule page to see what the rule would do without changing anything.</p>{% endif %}
     </section>
   </aside>
 </div>

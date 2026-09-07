@@ -70,3 +70,4 @@ details.run { border-bottom: 1px solid var(--line); padding: 6px 0; } details.ru
   table.schedule th, table.schedule td { min-width: 0; padding: 3px; } .chip { padding: 2px 4px; }
 }
 .payslip .num { text-align: right; } .payslip tfoot th { font-size: 15px; } .small { font-size: 12px; }
+.bar { background: #eef1f6; border-radius: 4px; height: 8px; width: 120px; overflow: hidden; } .bar-fill { background: var(--accent); height: 100%; }

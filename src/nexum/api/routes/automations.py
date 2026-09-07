@@ -11,7 +11,7 @@ from nexum.automation.engine import AutomationEngine
 from nexum.errors import NotFoundError
 from nexum.models import AutomationRule, AutomationRun
 from nexum.services import audit
-from nexum.services.dashboard import automation_stats
+from nexum.services.dashboard import automation_report, automation_stats
 from nexum.services.events import EVENT_NAMES
 
 router = APIRouter(prefix="/automations", tags=["automations"])
@@ -98,6 +98,79 @@ def run_rule(rule_id: int, db: DbSession, user: ManagerUser) -> RunOut:
     db.commit()
     run = get_engine().run_rule_id(rule_id, manual=True)
     return RunOut.model_validate(run)
+
+
+@router.post("/rules/{rule_id}/dry-run", response_model=RunOut)
+def dry_run_rule(rule_id: int, db: DbSession, user: ManagerUser) -> RunOut:
+    _get_rule(db, rule_id)
+    db.commit()
+    run = get_engine().run_rule_id(rule_id, manual=True, dry_run=True)
+    return RunOut(
+        id=0,
+        rule_id=rule_id,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        duration_ms=run.duration_ms,
+        status=run.status,
+        trigger_summary=run.trigger_summary,
+        log=list(run.log),
+        error=run.error,
+        minutes_saved=0,
+    )
+
+
+@router.post("/rules/{rule_id}/duplicate", response_model=RuleOut, status_code=201)
+def duplicate_rule(rule_id: int, db: DbSession, user: AdminUser) -> RuleOut:
+    source = _get_rule(db, rule_id)
+    copy = AutomationRule(
+        name=f"{source.name} (copy)",
+        description=source.description,
+        enabled=False,
+        trigger_type=source.trigger_type,
+        trigger_config=dict(source.trigger_config),
+        conditions=list(source.conditions),
+        actions=list(source.actions),
+        estimated_minutes_saved=source.estimated_minutes_saved,
+    )
+    db.add(copy)
+    db.flush()
+    audit.record(
+        db, "automation.rule_duplicated", "automation_rule", copy.id, actor=user, source=rule_id
+    )
+    db.commit()
+    return RuleOut.model_validate(copy)
+
+
+@router.get("/report")
+def report(
+    db: DbSession, _: ManagerUser, days: int = Query(default=30, ge=1, le=365)
+) -> dict[str, object]:
+    data = automation_report(db, days=days)
+    return {
+        "days": data["days"],
+        "total_runs": data["total_runs"],
+        "total_failed": data["total_failed"],
+        "total_minutes_saved": data["total_minutes_saved"],
+        "total_hours_saved": data["total_hours_saved"],
+        "rules": [
+            {
+                "id": row["rule"].id,
+                "key": row["rule"].key,
+                "name": row["rule"].name,
+                "enabled": row["rule"].enabled,
+                "runs": row["runs"],
+                "runs_7d": row["runs_7d"],
+                "success": row["success"],
+                "skipped": row["skipped"],
+                "failed": row["failed"],
+                "minutes_saved": row["minutes_saved"],
+                "avg_duration_ms": row["avg_duration_ms"],
+                "share_percent": row["share"],
+                "last_failure": row["last_failure"].error if row["last_failure"] else None,
+            }
+            for row in data["rows"]
+        ],
+    }
 
 
 @router.get("/runs", response_model=list[RunOut])

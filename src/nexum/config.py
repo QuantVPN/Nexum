@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     automation_enabled: bool = True
     automation_tick_seconds: int = 30
     automation_webhooks_enabled: bool = False
+    automation_retry_attempts: int = 3
+    automation_retry_backoff_seconds: float = 0.5
 
     # Company defaults used the first time the settings row is created
     company_name: str = "My company"
